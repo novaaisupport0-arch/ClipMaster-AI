@@ -73,7 +73,7 @@ export default function Home() {
             Turn long videos into <span style={{ color: "#54a5ff" }}>Shorts.</span>
           </h1>
           <p style={{ color: "#aab2c5", lineHeight: 1.7, fontSize: 16, maxWidth: 620 }}>
-            Paste a YouTube link to check it and preview the video. Clip generation is coming after the processing service is connected.
+            Paste a YouTube link to check it and preview the video. ClipMaster AI is being prepared as a free, capacity-limited beta with no paid AI processing APIs.
           </p>
         </section>
 
@@ -118,9 +118,19 @@ export default function Home() {
           )}
         </section>
 
+        <section style={{ marginTop: 28, background: "#101a2a", border: "1px solid #294365", padding: 20, borderRadius: 15 }}>
+          <h2 style={{ margin: "0 0 10px", fontSize: 21 }}>Free beta processing</h2>
+          <p style={{ color: "#b8c9e8", fontSize: 14, lineHeight: 1.7, margin: 0 }}>
+            Planned engine: open-source Whisper for transcription, FFmpeg for video cutting and export, and an open-source model for finding highlights. No paid AI API is planned. Free processing may have daily limits or pauses when computing capacity is unavailable.
+          </p>
+          <p style={{ color: "#ffcf85", fontSize: 13, lineHeight: 1.6, margin: "12px 0 0" }}>
+            Status: link checking and preview are available. AI clipping is not active yet; this page does not download or process the video.
+          </p>
+        </section>
+
         <section style={{ marginTop: 46 }}>
           <h2 style={{ fontSize: 25 }}>Simple plans</h2>
-          <p style={{ color: "#9daac0", marginTop: -7, fontSize: 14 }}>Planned export quality and pricing. Payments are not enabled yet.</p>
+          <p style={{ color: "#9daac0", marginTop: -7, fontSize: 14 }}>Proposed plans only. Payments and export tiers are not active; the beta will start with free, capacity-limited processing.</p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14 }}>
             {plans.map(plan => (
               <article key={plan.name} style={{ background: "#151b2b", border: "1px solid #29344a", padding: 20, borderRadius: 15 }}>
