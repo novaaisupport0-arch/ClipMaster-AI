@@ -22,9 +22,16 @@ function getYouTubeId(value) {
 }
 
 const plans = [
-  { name: "Free", price: "₹0", quality: "480p", detail: "Try the workflow" },
-  { name: "Starter", price: "₹79", quality: "720p", detail: "For regular creators" },
-  { name: "Pro", price: "₹149", quality: "1080p", detail: "For high-quality exports" }
+  { name: "Free", price: "₹0", clips: "6 clips", detail: "6 clips every month" },
+  { name: "Creator", price: "₹49", clips: "22 clips", detail: "20 clips + 2 bonus clips every month" },
+  { name: "Pro", price: "₹79", clips: "50 clips", detail: "50 clips every month" },
+  { name: "Studio", price: "₹199", clips: "115 clips", detail: "115 clips every month" }
+];
+
+const topUps = [
+  { price: "₹15", clips: "1 clip" },
+  { price: "₹20", clips: "3 clips" },
+  { price: "₹50", clips: "15 clips" }
 ];
 
 export default function Home() {
@@ -129,18 +136,29 @@ export default function Home() {
         </section>
 
         <section style={{ marginTop: 46 }}>
-          <h2 style={{ fontSize: 25 }}>Simple plans</h2>
-          <p style={{ color: "#9daac0", marginTop: -7, fontSize: 14 }}>Proposed plans only. Payments and export tiers are not active; the beta will start with free, capacity-limited processing.</p>
+          <h2 style={{ fontSize: 25 }}>Monthly clip plans</h2>
+          <p style={{ color: "#9daac0", marginTop: -7, fontSize: 14 }}>Planned subscription prices and monthly clip allowances. Payments are not active yet.</p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14 }}>
             {plans.map(plan => (
               <article key={plan.name} style={{ background: "#151b2b", border: "1px solid #29344a", padding: 20, borderRadius: 15 }}>
                 <h3 style={{ margin: "0 0 8px" }}>{plan.name}</h3>
                 <div style={{ fontSize: 30, fontWeight: 800 }}>{plan.price}<span style={{ fontSize: 13, color: "#9daac0", fontWeight: 400 }}>/month</span></div>
-                <p style={{ color: "#69aaff", fontWeight: 700 }}>{plan.quality} export</p>
+                <p style={{ color: "#69aaff", fontWeight: 700, fontSize: 19 }}>{plan.clips}</p>
                 <p style={{ color: "#9daac0", fontSize: 13 }}>{plan.detail}</p>
               </article>
             ))}
           </div>
+          <h2 style={{ fontSize: 22, marginTop: 30 }}>Clip top-ups</h2>
+          <p style={{ color: "#9daac0", marginTop: -7, fontSize: 14 }}>Extra clips when you need them.</p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12 }}>
+            {topUps.map(item => (
+              <article key={item.price} style={{ background: "#151b2b", border: "1px solid #29344a", padding: 18, borderRadius: 14 }}>
+                <div style={{ fontSize: 25, fontWeight: 800 }}>{item.price}</div>
+                <p style={{ color: "#69aaff", fontWeight: 700, marginBottom: 0 }}>{item.clips}</p>
+              </article>
+            ))}
+          </div>
+          <p style={{ color: "#ffcf85", fontSize: 12, lineHeight: 1.6, marginTop: 14 }}>All prices and clip allowances are displayed for planning only. Checkout, subscriptions, renewals and top-up purchases are not enabled.</p>
         </section>
 
         <footer style={{ textAlign: "center", color: "#71809a", marginTop: 55, fontSize: 12, lineHeight: 1.7 }}>
