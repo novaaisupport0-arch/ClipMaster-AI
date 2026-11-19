@@ -55,6 +55,8 @@ export default function Home() {
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
   const [backendStatus, setBackendStatus] = useState("checking");
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generatedClips, setGeneratedClips] = useState([]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -79,7 +81,7 @@ export default function Home() {
     setMessageType(id ? "success" : "error");
   }
 
-  function startGeneration() {
+  async function startGeneration() {
     if (!videoId && !selectedFile) {
       setMessage("Paste a YouTube link or choose a video file first.");
       setMessageType("error");
@@ -90,10 +92,58 @@ export default function Home() {
       setMessageType("error");
       return;
     }
-    setMessage(selectedFile
-      ? "Your video is selected and previewed locally. Secure upload, AI clipping and export are not connected yet; the file has not been sent to a server."
-      : "Your link is ready, but AI clipping and video export are not connected yet. No video has been downloaded or processed.");
+
+    setIsGenerating(true);
+    setGeneratedClips([]);
+    setMessage("Sending your video to ClipMaster AI…");
     setMessageType("info");
+
+    try {
+      const form = new FormData();
+      form.append("permission", "true");
+      if (selectedFile) {
+        form.append("video", selectedFile);
+      } else {
+        form.append("youtube_url", url.trim());
+      }
+
+      const createResponse = await fetch(`${API_BASE_URL}/jobs`, {
+        method: "POST",
+        body: form
+      });
+      const created = await createResponse.json();
+      if (!createResponse.ok) {
+        throw new Error(created.detail || "Could not start video processing.");
+      }
+
+      setMessage("Video received. Creating up to five 30-second vertical clips. Please keep this page open…");
+      const jobId = created.job_id;
+
+      for (let attempt = 0; attempt < 120; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        const statusResponse = await fetch(`${API_BASE_URL}/jobs/${jobId}`);
+        const job = await statusResponse.json();
+        if (!statusResponse.ok) {
+          throw new Error(job.detail || "Could not check processing status.");
+        }
+        if (job.status === "completed") {
+          setGeneratedClips(job.clips || []);
+          setMessage(job.message || "Your clips are ready.");
+          setMessageType("success");
+          return;
+        }
+        if (job.status === "failed") {
+          throw new Error(job.message || "Video processing failed.");
+        }
+        setMessage(job.message || "Your video is processing…");
+      }
+      throw new Error("Processing is taking longer than expected. Check again in a moment; temporary jobs may not survive a Render restart.");
+    } catch (error) {
+      setMessage(error.message || "Something went wrong while processing your video.");
+      setMessageType("error");
+    } finally {
+      setIsGenerating(false);
+    }
   }
 
   return (
@@ -136,6 +186,7 @@ export default function Home() {
           </div>
 
           {message && <p role="status" style={{ color: messageType === "error" ? "#ff9b9b" : messageType === "success" ? "#8ee5b2" : "#b8c9e8", lineHeight: 1.6, fontSize: 14, margin: "14px 0 0" }}>{message}</p>}
+          {generatedClips.length > 0 && <div style={{ marginTop: 18, display: "grid", gap: 10 }}><h3 style={{ margin: 0 }}>Your clips</h3>{generatedClips.map(clip => <a key={clip.name} href={`${API_BASE_URL}${clip.url}`} target="_blank" rel="noreferrer" download style={{ display: "block", padding: 13, borderRadius: 10, background: "#20334e", color: "#9dccff", textDecoration: "none", fontWeight: 700 }}>Download {clip.name} · {(clip.size_bytes / (1024 * 1024)).toFixed(1)} MB</a>)}</div>}
 
           {videoId && (
             <div style={{ marginTop: 20 }}>
@@ -154,8 +205,8 @@ export default function Home() {
                 <input type="checkbox" checked={permission} onChange={e => setPermission(e.target.checked)} style={{ marginTop: 3 }} />
                 I have permission or another lawful basis to create and use edits of this video.
               </label>
-              <button onClick={startGeneration} style={{ width: "100%", padding: 15, marginTop: 15, background: "#287cff", color: "white", border: 0, borderRadius: 10, fontWeight: 800, fontSize: 15, cursor: "pointer" }}>
-                Generate AI Clips →
+              <button onClick={startGeneration} disabled={isGenerating} style={{ width: "100%", padding: 15, marginTop: 15, background: isGenerating ? "#52627d" : "#287cff", color: "white", border: 0, borderRadius: 10, fontWeight: 800, fontSize: 15, cursor: isGenerating ? "wait" : "pointer" }}>
+                {isGenerating ? "Processing video…" : "Generate Clips →"}
               </button>
             </div>
           )}
@@ -202,8 +253,8 @@ export default function Home() {
                 <input type="checkbox" checked={permission} onChange={e => setPermission(e.target.checked)} style={{ marginTop: 3 }} />
                 I own this video or have permission or another lawful basis to create and use edits of it.
               </label>
-              <button onClick={startGeneration} style={{ width: "100%", padding: 15, marginTop: 15, background: "#287cff", color: "white", border: 0, borderRadius: 10, fontWeight: 800, fontSize: 15, cursor: "pointer" }}>
-                Prepare uploaded video →
+              <button onClick={startGeneration} disabled={isGenerating} style={{ width: "100%", padding: 15, marginTop: 15, background: isGenerating ? "#52627d" : "#287cff", color: "white", border: 0, borderRadius: 10, fontWeight: 800, fontSize: 15, cursor: isGenerating ? "wait" : "pointer" }}>
+                {isGenerating ? "Processing video…" : "Generate Clips →"}
               </button>
             </div>
           )}
@@ -212,10 +263,10 @@ export default function Home() {
         <section style={{ marginTop: 28, background: "#101a2a", border: "1px solid #294365", padding: 20, borderRadius: 15 }}>
           <h2 style={{ margin: "0 0 10px", fontSize: 21 }}>Free beta processing</h2>
           <p style={{ color: "#b8c9e8", fontSize: 14, lineHeight: 1.7, margin: 0 }}>
-            Planned engine: open-source Whisper for transcription, FFmpeg for video cutting and export, and an open-source model for finding highlights. No paid AI API is planned. Free processing may have daily limits or pauses when computing capacity is unavailable.
+            Current beta engine: FFmpeg creates up to five 30-second vertical clips from the beginning of a video. AI transcription and highlight detection are not enabled yet. Free processing may have daily limits or pauses when computing capacity is unavailable.
           </p>
           <p style={{ color: "#ffcf85", fontSize: 13, lineHeight: 1.6, margin: "12px 0 0" }}>
-            Status: YouTube link checking and local video preview are available. Secure upload, AI clipping and export are not active yet.
+            Status: video upload and supported YouTube link processing are connected. Clips are temporarily stored on the server for up to five hours; download your clips to keep them.
           </p>
         </section>
 
