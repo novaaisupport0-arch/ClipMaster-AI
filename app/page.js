@@ -21,6 +21,8 @@ function getYouTubeId(value) {
   }
 }
 
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || "https://clipmaster-ai-backend.onrender.com").replace(/\\/$/, "");
+
 const plans = [
   { name: "Free", price: "₹0", clips: "6 clips", detail: "6 clips every month" },
   { name: "Creator", price: "₹49", clips: "22 clips", detail: "20 clips + 2 bonus clips every month" },
@@ -52,6 +54,21 @@ export default function Home() {
   const [permission, setPermission] = useState(false);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
+  const [backendStatus, setBackendStatus] = useState("checking");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch(`${API_BASE_URL}/health`, { signal: controller.signal })
+      .then(response => {
+        if (!response.ok) throw new Error("Backend health check failed");
+        return response.json();
+      })
+      .then(data => setBackendStatus(data.status === "healthy" ? "online" : "unavailable"))
+      .catch(error => {
+        if (error.name !== "AbortError") setBackendStatus("unavailable");
+      });
+    return () => controller.abort();
+  }, []);
 
   function checkLink() {
     const id = getYouTubeId(url);
@@ -87,6 +104,11 @@ export default function Home() {
           <span style={{ color: "#69aaff", fontSize: 21, fontWeight: 800 }}>ClipMaster AI</span>
           <span style={{ marginLeft: "auto", color: "#aab2c5", fontSize: 12, border: "1px solid #303b52", borderRadius: 20, padding: "7px 10px" }}>BETA</span>
         </header>
+
+        <div role="status" style={{ marginTop: 18, display: "inline-flex", alignItems: "center", gap: 8, border: "1px solid #303b52", borderRadius: 20, padding: "8px 12px", color: backendStatus === "online" ? "#8ee5b2" : backendStatus === "unavailable" ? "#ff9b9b" : "#b8c9e8", fontSize: 12 }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: backendStatus === "online" ? "#38c982" : backendStatus === "unavailable" ? "#ff7777" : "#d6ad52" }} />
+          Backend: {backendStatus === "online" ? "Connected" : backendStatus === "unavailable" ? "Unavailable" : "Checking…"}
+        </div>
 
         <section style={{ padding: "58px 0 24px", maxWidth: 760 }}>
           <p style={{ color: "#69aaff", fontWeight: 700, letterSpacing: 2, fontSize: 12 }}>YOUTUBE TO SHORTS</p>
