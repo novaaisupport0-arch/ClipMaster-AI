@@ -21,7 +21,7 @@ function getYouTubeId(value) {
   }
 }
 
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_URL || "https://clipmaster-ai-backend.onrender.com").replace(/\\/$/, "");
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://clipmaster-ai-backend.onrender.com";
 
 const plans = [
   { name: "Free", price: "₹0", clips: "6 clips", detail: "6 clips every month" },
