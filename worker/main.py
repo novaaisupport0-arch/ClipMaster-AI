@@ -4,6 +4,7 @@ import uuid
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,8 @@ WORKER_TOKEN = os.getenv("WORKER_API_TOKEN", "")
 MODEL_SIZE = os.getenv("WHISPER_MODEL", "small")
 COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
 LANGUAGE = os.getenv("WHISPER_LANGUAGE", "").strip() or None
+RETENTION_SECONDS = 5 * 60 * 60
+EXPIRY_MARKER = ".expires_at"
 
 app = FastAPI(title=APP_NAME, version="0.1.0")
 app.add_middleware(
@@ -37,6 +40,38 @@ model: WhisperModel | None = None
 model_lock = threading.Lock()
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".webm", ".m4v"}
 SAFE_NAME = re.compile(r"[^a-zA-Z0-9._-]+")
+
+
+def set_job_expiry(job_dir: Path) -> int:
+    expires_at = int(time.time()) + RETENTION_SECONDS
+    (job_dir / EXPIRY_MARKER).write_text(str(expires_at), encoding="utf-8")
+    return expires_at
+
+
+def cleanup_expired_jobs() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    now = int(time.time())
+    for job_dir in DATA_DIR.iterdir():
+        if not job_dir.is_dir():
+            continue
+        marker = job_dir / EXPIRY_MARKER
+        if not marker.is_file():
+            continue
+        try:
+            expires_at = int(marker.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError):
+            continue
+        if now >= expires_at:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            with jobs_lock:
+                jobs.pop(job_dir.name, None)
+
+
+def cleanup_loop() -> None:
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    while True:
+        cleanup_expired_jobs()
+        time.sleep(60)
 
 
 def require_token(authorization: str | None) -> None:
@@ -212,17 +247,23 @@ def process_job(job_id: str, source_path: Path, job_dir: Path) -> None:
                 jobs[job_id]["progress"] = 50 + int(45 * index / len(windows))
 
         with jobs_lock:
+            expires_at = set_job_expiry(job_dir)
             jobs[job_id].update({
                 "status": "completed",
                 "progress": 100,
+                "expires_at": expires_at,
+                "retention_seconds": RETENTION_SECONDS,
                 "clips": clips,
                 "transcript": " ".join(item["text"] for item in segments),
                 "message": f"Created {len(clips)} vertical clips.",
             })
     except Exception as exc:
+        expires_at = set_job_expiry(job_dir)
         with jobs_lock:
             jobs[job_id].update({
                 "status": "failed",
+                "expires_at": expires_at,
+                "retention_seconds": RETENTION_SECONDS,
                 "progress": 0,
                 "error": str(exc)[:3000],
             })
@@ -237,6 +278,7 @@ def health() -> dict[str, Any]:
         "configured": bool(WORKER_TOKEN),
         "model": MODEL_SIZE,
         "max_upload_mb": MAX_UPLOAD_MB,
+        "clip_retention_hours": 5,
     }
 
 
@@ -291,6 +333,8 @@ def get_job(job_id: str, authorization: str | None = Header(default=None)) -> di
         job = jobs.get(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="Job not found. Jobs are held in memory on this worker.")
+        if job.get("expires_at") and int(time.time()) >= job["expires_at"]:
+            raise HTTPException(status_code=410, detail="This job and its cloud files have expired.")
         return dict(job)
 
 
@@ -303,6 +347,8 @@ def download_clip(
     require_token(authorization)
     with jobs_lock:
         job = jobs.get(job_id)
+        if job and job.get("expires_at") and int(time.time()) >= job["expires_at"]:
+            raise HTTPException(status_code=410, detail="This clip has expired and was removed from cloud storage.")
         if not job or job.get("status") != "completed":
             raise HTTPException(status_code=404, detail="Completed clip not found.")
         clip = next((item for item in job["clips"] if item["index"] == clip_index), None)
@@ -312,3 +358,7 @@ def download_clip(
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Clip file is no longer available.")
     return FileResponse(path, media_type="video/mp4", filename=clip["filename"])
+
+ 
+# Persisted expiry markers allow cleanup to continue after a worker restart.
+threading.Thread(target=cleanup_loop, name="clip-retention-cleanup", daemon=True).start()

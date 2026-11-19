@@ -10,6 +10,14 @@ This is a separate Python service for **videos uploaded by users who have the ri
 4. Uses FFmpeg to render vertical 9:16 MP4 clips with burned-in subtitles.
 5. Exposes job status and clip-download endpoints.
 
+## Temporary video retention
+
+- The original upload, generated MP4 clips and intermediate subtitle files remain on the worker only until **5 hours after processing finishes** (or 5 hours after a failed job).
+- The worker writes a persistent expiry marker and runs a cleanup task every 60 seconds. The marker lets cleanup continue after a worker restart.
+- Job status and clip-download requests return HTTP 410 after the retention period.
+- This only deletes cloud-side temporary files. A clip already downloaded to a user's own phone or computer is outside the worker's control and is not deleted.
+- This policy does not cover copies created by infrastructure-level backups or snapshots. Disable backup/version retention for the worker's temporary-data volume if the hosting provider enables it by default.
+
 The highlight selector is an initial heuristic, not a trained virality model. Review clips before publishing.
 
 ## Run locally or in a Docker host
