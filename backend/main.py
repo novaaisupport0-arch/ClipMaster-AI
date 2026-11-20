@@ -44,7 +44,7 @@ app.add_middleware(
 
 ROOT = Path(os.getenv("CLIP_STORAGE_DIR", "/tmp/clipmaster"))
 JOBS_DIR = ROOT / "jobs"
-MAX_UPLOAD_BYTES = 150 * 1024 * 1024
+MAX_UPLOAD_BYTES = 150 * 1000 * 1000
 MAX_SOURCE_BYTES = MAX_UPLOAD_BYTES
 CLIP_SECONDS = 30
 MAX_CLIPS = 5
@@ -151,6 +151,26 @@ def get_media_duration(source, ffmpeg):
     return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
 
 
+
+def detect_audio_peaks(source, ffmpeg):
+    """Return one-second audio RMS samples, used as a lightweight energy signal."""
+    command = [
+        ffmpeg, "-hide_banner", "-i", str(source), "-vn",
+        "-af", "aresample=8000,asetnsamples=n=8000:p=1,astats=metadata=1:reset=1,ametadata=print:file=-",
+        "-f", "null", "-"
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=1800)
+    samples = []
+    current_time = None
+    for line in (result.stdout + "\n" + result.stderr).splitlines():
+        time_match = re.search(r"pts_time:([0-9]+(?:\.[0-9]+)?)", line)
+        if time_match:
+            current_time = float(time_match.group(1))
+        rms_match = re.search(r"lavfi\.astats\.Overall\.RMS_level=(-?[0-9]+(?:\.[0-9]+)?)", line)
+        if rms_match and current_time is not None:
+            samples.append((current_time, float(rms_match.group(1))))
+    return samples
+
 def make_clips(source, output_dir, job):
     """Detect visually active moments, then render up to five vertical highlight clips."""
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
@@ -159,10 +179,11 @@ def make_clips(source, output_dir, job):
     clip_length = min(float(CLIP_SECONDS), duration)
     job["progress"] = 3
     job["eta_seconds"] = None
-    job["message"] = "Analyzing scene changes to find highlights…"
+    job["message"] = "Analyzing scene changes and audio peaks to find highlights…"
     started = time.time()
 
     scene_events = []
+    audio_samples = []
     try:
         scan = subprocess.run(
             [
@@ -182,9 +203,13 @@ def make_clips(source, output_dir, job):
                 if score_match:
                     scene_events.append((current_time, float(score_match.group(1))))
     except Exception:
-        logger.exception("Scene-change analysis failed; using evenly spaced clips")
+        logger.exception("Scene-change analysis failed; continuing with audio analysis")
+    try:
+        audio_samples = detect_audio_peaks(source, ffmpeg)
+    except Exception:
+        logger.exception("Audio peak analysis failed; continuing with scene analysis")
 
-    # Rank 30-second windows by the number and strength of scene changes.
+    # Rank 30-second windows by scene changes and audio energy.
     if duration <= clip_length:
         starts = [0.0]
     else:
@@ -195,7 +220,12 @@ def make_clips(source, output_dir, job):
             events = [score for timestamp, score in scene_events if candidate <= timestamp < candidate + clip_length]
             density = min(1.0, len(events) / max(3.0, clip_length / 5.0))
             strongest = max(events, default=0.0)
-            candidates.append((density * 0.8 + strongest * 0.2, candidate))
+            levels = [level for timestamp, level in audio_samples if candidate <= timestamp < candidate + clip_length and level > -65]
+            audio_score = 0.0
+            if levels:
+                average_db = sum(levels) / len(levels)
+                audio_score = max(0.0, min(1.0, (average_db + 55.0) / 35.0))
+            candidates.append((density * 0.55 + audio_score * 0.35 + strongest * 0.10, candidate))
             candidate += 5.0
         candidates.sort(reverse=True)
         starts = []
@@ -317,7 +347,7 @@ def diagnostics():
         "yt_dlp_version": ytdlp_version,
         "storage_writable": storage_writable,
         "active_jobs_in_memory": len(JOBS),
-        "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
+        "max_upload_mb": MAX_UPLOAD_BYTES // 1_000_000,
         "max_source_mb": MAX_SOURCE_BYTES // (1024 * 1024),
     }
 
