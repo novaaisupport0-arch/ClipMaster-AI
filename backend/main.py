@@ -93,7 +93,7 @@ def get_media_duration(source, ffmpeg):
         timeout=30,
     )
     import re
-    match = re.search(r"Duration:\\s*(\\d+):(\\d+):(\\d+(?:\\.\\d+)?)", result.stderr or "")
+    match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", result.stderr or "")
     if not match:
         return None
     hours, minutes, seconds = match.groups()
