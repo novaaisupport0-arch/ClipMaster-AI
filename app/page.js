@@ -34,10 +34,10 @@ function formatEta(seconds) {
 }
 
 const plans = [
-  { name: "Free", price: "₹0", clips: "6 clips", detail: "6 clips every month" },
-  { name: "Creator", price: "₹49", clips: "22 clips", detail: "20 clips + 2 bonus clips every month" },
-  { name: "Pro", price: "₹79", clips: "50 clips", detail: "50 clips every month" },
-  { name: "Studio", price: "₹199", clips: "115 clips", detail: "115 clips every month" }
+  { name: "Free", price: "₹0", clips: "Free beta", detail: ["3 processing requests per rolling 24 hours", "Up to 3 clips per video", "150 MB maximum upload", "15 minutes maximum video duration", "Standard / low-priority queue"], active: true },
+  { name: "Creator", price: "₹49", clips: "22 clips / month", detail: ["250 MB maximum upload (planned)", "30 minutes maximum video duration (planned)", "Priority processing (planned)"], active: false },
+  { name: "Pro", price: "₹79", clips: "50 clips / month", detail: ["500 MB maximum upload (planned)", "60 minutes maximum video duration (planned)", "High-priority processing (planned)"], active: false },
+  { name: "Studio", price: "₹199", clips: "115 clips / month", detail: ["1 GB maximum upload (planned)", "120 minutes maximum video duration (planned)", "Highest processing priority (planned)"], active: false }
 ];
 
 const topUps = [
@@ -162,7 +162,7 @@ export default function Home() {
         throw new Error(created.detail || "Could not start video processing.");
       }
 
-      setMessage("Video received. Creating up to five 30-second vertical clips. Please keep this page open…");
+      setMessage("Video received. Creating up to three 30-second vertical clips. Please keep this page open…");
       const jobId = created.job_id;
       setProgress(2);
 
@@ -277,7 +277,7 @@ export default function Home() {
           </div>
           <label htmlFor="video-file" style={{ display: "block", fontWeight: 700, marginBottom: 10 }}>Choose a video from your device</label>
           <p style={{ color: "#9daac0", fontSize: 12, lineHeight: 1.6, margin: "0 0 10px" }}>
-            Supports MP4, MOV, MKV, WebM, AVI, WMV, FLV, M4V, MPEG, 3GP, TS, OGV and other FFmpeg-readable video files. Maximum upload: 150 MB.
+            Supports MP4, MOV, MKV, WebM, AVI, WMV, FLV, M4V, MPEG, 3GP, TS, OGV and other FFmpeg-readable video files. Free beta maximum: 150 MB and 15 minutes.
           </p>
           <label
             htmlFor="video-file"
@@ -329,7 +329,7 @@ export default function Home() {
         <section style={{ marginTop: 28, background: "#101a2a", border: "1px solid #294365", padding: 20, borderRadius: 15 }}>
           <h2 style={{ margin: "0 0 10px", fontSize: 21 }}>Free beta processing</h2>
           <p style={{ color: "#b8c9e8", fontSize: 14, lineHeight: 1.7, margin: 0 }}>
-            Current beta engine: FFmpeg detects scene changes and selects up to five 30-second vertical highlight clips. This first version uses visual activity, not semantic AI transcription. Free processing may have daily limits or pauses when computing capacity is unavailable.
+            Free beta limits are active: up to 3 processing requests per rolling 24 hours per IP address, up to 3 clips per video, 150 MB per upload, and 15 minutes per source video. Jobs use the standard / lower-priority queue. Limits are provisional and may affect people sharing the same network; they reset as older requests pass the 24-hour window. The engine uses FFmpeg scene changes and audio peaks, not semantic AI transcription.
           </p>
           <p style={{ color: "#ffcf85", fontSize: 13, lineHeight: 1.6, margin: "12px 0 0" }}>
             Status: video upload and supported YouTube link processing are connected. Clips are temporarily stored on the server for up to five hours; download your clips to keep them.
@@ -338,14 +338,17 @@ export default function Home() {
 
         <section style={{ marginTop: 46 }}>
           <h2 style={{ fontSize: 25 }}>Monthly clip plans</h2>
-          <p style={{ color: "#9daac0", marginTop: -7, fontSize: 14 }}>Planned subscription prices and monthly clip allowances. Payments are not active yet.</p>
+          <p style={{ color: "#9daac0", marginTop: -7, fontSize: 14 }}>Free beta limits are active now. Paid tiers are planned only; checkout, payment verification and paid priority are not enabled.</p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14 }}>
             {plans.map(plan => (
               <article key={plan.name} style={{ background: "#151b2b", border: "1px solid #29344a", padding: 20, borderRadius: 15 }}>
                 <h3 style={{ margin: "0 0 8px" }}>{plan.name}</h3>
                 <div style={{ fontSize: 30, fontWeight: 800 }}>{plan.price}<span style={{ fontSize: 13, color: "#9daac0", fontWeight: 400 }}>/month</span></div>
-                <p style={{ color: "#69aaff", fontWeight: 700, fontSize: 19 }}>{plan.clips}</p>
-                <p style={{ color: "#9daac0", fontSize: 13 }}>{plan.detail}</p>
+                <p style={{ color: "#69aaff", fontWeight: 700, fontSize: 17 }}>{plan.clips}</p>
+                <ul style={{ color: "#9daac0", fontSize: 13, lineHeight: 1.7, paddingLeft: 18 }}>
+                  {plan.detail.map(item => <li key={item}>{item}</li>)}
+                </ul>
+                <p style={{ color: plan.active ? "#8ee5b2" : "#ffcf85", fontSize: 12, fontWeight: 700 }}>{plan.active ? "AVAILABLE NOW" : "COMING LATER — NOT ACTIVE"}</p>
               </article>
             ))}
           </div>
@@ -359,7 +362,7 @@ export default function Home() {
               </article>
             ))}
           </div>
-          <p style={{ color: "#ffcf85", fontSize: 12, lineHeight: 1.6, marginTop: 14 }}>All prices and clip allowances are displayed for planning only. Checkout, subscriptions, renewals and top-up purchases are not enabled.</p>
+          <p style={{ color: "#ffcf85", fontSize: 12, lineHeight: 1.6, marginTop: 14 }}>Paid plans and top-ups are display-only previews. No payment is collected and no paid feature or faster queue is enabled yet.</p>
         </section>
 
         <footer style={{ textAlign: "center", color: "#71809a", marginTop: 55, fontSize: 12, lineHeight: 1.7 }}>
