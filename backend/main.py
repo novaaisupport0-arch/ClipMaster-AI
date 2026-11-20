@@ -47,11 +47,15 @@ JOBS_DIR = ROOT / "jobs"
 MAX_UPLOAD_BYTES = 150 * 1000 * 1000
 MAX_SOURCE_BYTES = MAX_UPLOAD_BYTES
 CLIP_SECONDS = 30
-MAX_CLIPS = 5
+MAX_CLIPS = 3
 RETENTION_SECONDS = 5 * 60 * 60
 RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "10"))
 RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "600"))
+FREE_DAILY_REQUESTS = int(os.getenv("FREE_DAILY_REQUESTS", "3"))
+FREE_DAILY_WINDOW_SECONDS = 24 * 60 * 60
 REQUESTS_BY_IP = defaultdict(deque)
+FREE_REQUESTS_BY_IP = defaultdict(deque)
+MAX_VIDEO_DURATION_SECONDS = 15 * 60
 JOBS = {}
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -73,8 +77,20 @@ def enforce_rate_limit(client_ip):
     while requests and now - requests[0] > RATE_LIMIT_WINDOW_SECONDS:
         requests.popleft()
     if len(requests) >= RATE_LIMIT_REQUESTS:
-        raise HTTPException(status_code=429, detail="Too many processing requests. Please wait and try again.")
+        raise HTTPException(status_code=429, detail="Too many requests in a short period. Please wait and try again.")
     requests.append(now)
+
+    # Anonymous Free-tier quota until accounts and persistent subscription storage exist.
+    # Users sharing a public IP also share this provisional quota.
+    daily_requests = FREE_REQUESTS_BY_IP[client_ip]
+    while daily_requests and now - daily_requests[0] > FREE_DAILY_WINDOW_SECONDS:
+        daily_requests.popleft()
+    if len(daily_requests) >= FREE_DAILY_REQUESTS:
+        raise HTTPException(
+            status_code=429,
+            detail="Free beta limit reached: 3 processing requests per rolling 24 hours per network. Please try again later."
+        )
+    daily_requests.append(now)
 
 
 SUPPORTED_VIDEO_EXTENSIONS = {
@@ -275,7 +291,10 @@ def process_job(job_id, source_path=None, youtube_url=None):
         if not source.exists():
             raise RuntimeError("The uploaded source video is missing.")
         if source.stat().st_size > MAX_SOURCE_BYTES:
-            raise RuntimeError("The video is too large. The current limit is 150 MB.")
+            raise RuntimeError("The video is too large. The Free beta upload limit is 150 MB.")
+        source_duration = get_media_duration(source, imageio_ffmpeg.get_ffmpeg_exe())
+        if source_duration is not None and source_duration > MAX_VIDEO_DURATION_SECONDS:
+            raise RuntimeError("The Free beta video duration limit is 15 minutes.")
         JOBS[job_id]["progress"] = 2
         JOBS[job_id]["message"] = "Video received. Preparing processing…"
         clips = make_clips(source, output_dir, JOBS[job_id])
@@ -349,6 +368,9 @@ def diagnostics():
         "active_jobs_in_memory": len(JOBS),
         "max_upload_mb": MAX_UPLOAD_BYTES // 1_000_000,
         "max_source_mb": MAX_SOURCE_BYTES // (1024 * 1024),
+        "free_daily_requests_per_ip": FREE_DAILY_REQUESTS,
+        "free_max_video_minutes": MAX_VIDEO_DURATION_SECONDS // 60,
+        "free_max_clips_per_video": MAX_CLIPS,
     }
 
 
