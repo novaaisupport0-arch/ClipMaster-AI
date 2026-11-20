@@ -77,15 +77,28 @@ def enforce_rate_limit(client_ip):
     requests.append(now)
 
 
-def valid_video_signature(header, extension):
-    # Validate container signatures rather than trusting the browser-supplied MIME type.
-    if extension in {".mp4", ".m4v", ".mov"}:
-        return len(header) >= 12 and header[4:8] == b"ftyp"
-    if extension == ".webm":
-        return header.startswith(bytes.fromhex("1A45DFA3"))
-    if extension == ".mkv":
-        return header.startswith(bytes.fromhex("1A45DFA3"))
-    return False
+SUPPORTED_VIDEO_EXTENSIONS = {
+    ".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi", ".wmv",
+    ".flv", ".mpeg", ".mpg", ".mpe", ".3gp", ".3g2", ".ts",
+    ".mts", ".m2ts", ".ogv", ".ogg", ".vob", ".asf", ".mxf",
+}
+
+
+def probe_video_file(source):
+    """Ask FFmpeg to inspect the container and confirm that it has a video stream."""
+    ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+    result = subprocess.run(
+        [ffmpeg, "-hide_banner", "-i", str(source)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    details = result.stderr or ""
+    if not re.search(r"Stream #\\d+:\\d+.*Video:", details, re.IGNORECASE):
+        raise HTTPException(
+            status_code=415,
+            detail="This file is not a readable video, or its video codec is unsupported. Try MP4, MOV, MKV, AVI or WebM.",
+        )
 
 
 def valid_youtube_url(value):
@@ -317,13 +330,13 @@ async def create_job(
 
     if video:
         logger.info("Upload request received; filename=%s content_type=%s", Path(video.filename or "video").name, video.content_type or "unknown")
-        if not (video.content_type or "").startswith("video/"):
+        extension = Path(video.filename or "").suffix.lower()
+        if extension not in SUPPORTED_VIDEO_EXTENSIONS:
             shutil.rmtree(job_dir, ignore_errors=True)
-            raise HTTPException(status_code=400, detail="Please upload a supported video file.")
-        extension = Path(video.filename or "video.mp4").suffix.lower()
-        if extension not in {".mp4", ".mov", ".webm", ".mkv", ".m4v"}:
-            shutil.rmtree(job_dir, ignore_errors=True)
-            raise HTTPException(status_code=415, detail="Upload an MP4, MOV, WebM or MKV video.")
+            raise HTTPException(
+                status_code=415,
+                detail="Unsupported file extension. Try MP4, MOV, MKV, WebM, AVI, WMV, FLV, M4V, MPEG, 3GP, TS or OGV.",
+            )
         source_path = job_dir / f"upload{extension}"
         total = 0
         try:
@@ -332,15 +345,16 @@ async def create_job(
                     chunk = await video.read(1024 * 1024)
                     if not chunk:
                         break
-                    if total == 0 and not valid_video_signature(chunk[:32], extension):
-                        raise HTTPException(status_code=415, detail="The uploaded file does not match a supported video format.")
                     total += len(chunk)
                     if total > MAX_UPLOAD_BYTES:
                         raise HTTPException(status_code=413, detail="Upload limit is 150 MB.")
                     destination.write(chunk)
-            logger.info("Upload saved; job_id=%s size_bytes=%s", job_id, total)
+            if total == 0:
+                raise HTTPException(status_code=400, detail="The selected video file is empty.")
+            probe_video_file(source_path)
+            logger.info("Upload saved and verified; job_id=%s size_bytes=%s extension=%s", job_id, total, extension)
         except Exception:
-            logger.exception("Upload failed while receiving file; job_id=%s", job_id)
+            logger.exception("Upload failed validation or receiving; job_id=%s", job_id)
             shutil.rmtree(job_dir, ignore_errors=True)
             raise
         finally:
