@@ -23,6 +23,15 @@ function getYouTubeId(value) {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://clipmaster-ai-backend.onrender.com";
 
+function formatEta(seconds) {
+  if (seconds == null || !Number.isFinite(Number(seconds))) return "Calculating…";
+  const value = Math.max(0, Math.ceil(Number(seconds)));
+  if (value < 60) return `about ${value} sec`;
+  const minutes = Math.floor(value / 60);
+  const remainingSeconds = value % 60;
+  return remainingSeconds ? `about ${minutes} min ${remainingSeconds} sec` : `about ${minutes} min`;
+}
+
 const plans = [
   { name: "Free", price: "₹0", clips: "6 clips", detail: "6 clips every month" },
   { name: "Creator", price: "₹49", clips: "22 clips", detail: "20 clips + 2 bonus clips every month" },
@@ -56,6 +65,8 @@ export default function Home() {
   const [messageType, setMessageType] = useState("info");
   const [backendStatus, setBackendStatus] = useState("checking");
   const [isGenerating, setIsGenerating] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [etaSeconds, setEtaSeconds] = useState(null);
   const [generatedClips, setGeneratedClips] = useState([]);
 
   useEffect(() => {
@@ -94,6 +105,8 @@ export default function Home() {
     }
 
     setIsGenerating(true);
+    setProgress(0);
+    setEtaSeconds(null);
     setGeneratedClips([]);
     setMessage("Sending your video to ClipMaster AI…");
     setMessageType("info");
@@ -118,6 +131,7 @@ export default function Home() {
 
       setMessage("Video received. Creating up to five 30-second vertical clips. Please keep this page open…");
       const jobId = created.job_id;
+      setProgress(2);
 
       for (let attempt = 0; attempt < 120; attempt += 1) {
         await new Promise(resolve => setTimeout(resolve, 3000));
@@ -126,7 +140,11 @@ export default function Home() {
         if (!statusResponse.ok) {
           throw new Error(job.detail || "Could not check processing status.");
         }
+        setProgress(Number(job.progress ?? 0));
+        setEtaSeconds(job.eta_seconds ?? null);
         if (job.status === "completed") {
+          setProgress(100);
+          setEtaSeconds(0);
           setGeneratedClips(job.clips || []);
           setMessage(job.message || "Your clips are ready.");
           setMessageType("success");
@@ -186,6 +204,15 @@ export default function Home() {
           </div>
 
           {message && <p role="status" style={{ color: messageType === "error" ? "#ff9b9b" : messageType === "success" ? "#8ee5b2" : "#b8c9e8", lineHeight: 1.6, fontSize: 14, margin: "14px 0 0" }}>{message}</p>}
+          {isGenerating && <div style={{ marginTop: 16, padding: 14, borderRadius: 12, background: "#0c1322", border: "1px solid #303b52" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 9, fontSize: 14 }}>
+              <strong>Video processing</strong><strong>{progress}%</strong>
+            </div>
+            <div style={{ height: 10, overflow: "hidden", borderRadius: 20, background: "#303b52" }}>
+              <div style={{ width: `${progress}%`, height: "100%", borderRadius: 20, background: "#287cff", transition: "width 0.5s ease" }} />
+            </div>
+            <p style={{ margin: "9px 0 0", color: "#b8c9e8", fontSize: 13 }}>Estimated time remaining: {formatEta(etaSeconds)}. This is an estimate and may change with server speed.</p>
+          </div>}
           {generatedClips.length > 0 && <div style={{ marginTop: 18, display: "grid", gap: 10 }}><h3 style={{ margin: 0 }}>Your clips</h3>{generatedClips.map(clip => <a key={clip.name} href={`${API_BASE_URL}${clip.url}`} target="_blank" rel="noreferrer" download style={{ display: "block", padding: 13, borderRadius: 10, background: "#20334e", color: "#9dccff", textDecoration: "none", fontWeight: 700 }}>Download {clip.name} · {(clip.size_bytes / (1024 * 1024)).toFixed(1)} MB</a>)}</div>}
 
           {videoId && (
