@@ -275,24 +275,24 @@ export default function Home() {
           <p style={{ color: "#9daac0", fontSize: 12, lineHeight: 1.6, margin: "0 0 10px" }}>
             Supports MP4, MOV, MKV, WebM, AVI, WMV, FLV, M4V, MPEG, 3GP, TS, OGV and other FFmpeg-readable video files. Maximum upload: 150 MB.
           </p>
-          <input
-            ref={videoInputRef}
-            id="video-file"
-            type="file"
-            accept="video/*"
-            onChange={handleVideoSelection}
-            aria-label="Choose a video from your phone"
-            style={{ position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0, 0, 0, 0)", whiteSpace: "nowrap", border: 0 }}
-          />
-          <button
-            type="button"
-            onClick={() => { if (videoInputRef.current) { videoInputRef.current.value = ""; videoInputRef.current.click(); } }}
-            style={{ display: "block", width: "100%", boxSizing: "border-box", padding: 16, border: "1px dashed #69aaff", borderRadius: 12, background: "#0c1b31", color: "#dceeff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}
+          <label
+            htmlFor="video-file"
+            style={{ position: "relative", display: "block", width: "100%", boxSizing: "border-box", padding: 16, border: "1px dashed #69aaff", borderRadius: 12, background: "#0c1b31", color: "#dceeff", fontSize: 15, fontWeight: 800, cursor: "pointer", textAlign: "center" }}
           >
+            <input
+              ref={videoInputRef}
+              id="video-file"
+              type="file"
+              accept="video/*"
+              onClick={event => { event.currentTarget.value = ""; }}
+              onChange={handleVideoSelection}
+              aria-label="Choose a video from your phone"
+              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer" }}
+            />
             <span style={{ display: "block", fontSize: 24, marginBottom: 6 }}>▣</span>
             Browse phone videos
-            <span style={{ display: "block", marginTop: 6, color: "#9daac0", fontSize: 12, fontWeight: 400 }}>Open your device's video picker and choose a video</span>
-          </button>
+            <span style={{ display: "block", marginTop: 6, color: "#9daac0", fontSize: 12, fontWeight: 400 }}>Tap here to open your phone's video picker</span>
+          </label>
           {selectedFile && (
             <div style={{ marginTop: 16 }}>
               <p style={{ color: "#b8c9e8", fontSize: 13, overflowWrap: "anywhere" }}>
