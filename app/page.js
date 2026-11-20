@@ -22,7 +22,7 @@ function getYouTubeId(value) {
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://clipmaster-ai-backend.onrender.com";
-const MAX_UPLOAD_BYTES = 150 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 150 * 1000 * 1000;
 
 function formatEta(seconds) {
   if (seconds == null || !Number.isFinite(Number(seconds))) return "Calculating…";
@@ -102,7 +102,7 @@ export default function Home() {
     // Keep the returned File object intact; reset the input before opening the picker instead.
     if (file.size > MAX_UPLOAD_BYTES) {
       setSelectedFile(null);
-      setMessage("This video is larger than 150 MiB. Please choose a smaller video.");
+      setMessage("This video is larger than 150 MB. Please choose a smaller video.");
       setMessageType("error");
       input.value = "";
       return;
@@ -273,7 +273,7 @@ export default function Home() {
           </div>
           <label htmlFor="video-file" style={{ display: "block", fontWeight: 700, marginBottom: 10 }}>Choose a video from your device</label>
           <p style={{ color: "#9daac0", fontSize: 12, lineHeight: 1.6, margin: "0 0 10px" }}>
-            Supports MP4, MOV, MKV, WebM, AVI, WMV, FLV, M4V, MPEG, 3GP, TS, OGV and other FFmpeg-readable video files. Maximum upload: 150 MiB (about 157 MB).
+            Supports MP4, MOV, MKV, WebM, AVI, WMV, FLV, M4V, MPEG, 3GP, TS, OGV and other FFmpeg-readable video files. Maximum upload: 150 MB.
           </p>
           <input
             ref={videoInputRef}
