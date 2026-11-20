@@ -383,12 +383,12 @@ async def create_job(
     video: UploadFile | None = File(None),
 ):
     cleanup_expired()
-    enforce_rate_limit(request.client.host if request.client else "unknown")
     if not permission:
         raise HTTPException(status_code=400, detail="Please confirm you have the right to edit this video.")
     if bool(youtube_url.strip()) == bool(video):
         raise HTTPException(status_code=400, detail="Provide either a YouTube URL or one video upload.")
-    
+    enforce_rate_limit(request.client.host if request.client else "unknown")
+
     job_id = uuid.uuid4().hex
     job_dir = JOBS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
