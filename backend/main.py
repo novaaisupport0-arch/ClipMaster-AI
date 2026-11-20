@@ -22,20 +22,24 @@ from fastapi.responses import FileResponse
 
 app = FastAPI(title="ClipMaster AI API", version="1.2")
 
-ALLOWED_ORIGINS = [
-    item.strip()
-    for item in os.getenv(
-        "CORS_ORIGINS",
-        "https://clip-master-ai-oh8r.vercel.app,https://clip-master-ai-oh8r-blue-ray.vercel.app"
-    ).split(",")
-    if item.strip()
+DEFAULT_ALLOWED_ORIGINS = [
+    "https://clip-master-ai-oh8r.vercel.app",
+    "https://clip-master-ai-oh8r-blue-ray.vercel.app",
 ]
+CONFIGURED_ORIGINS = os.getenv("CORS_ORIGINS", "").split(",")
+ALLOWED_ORIGINS = sorted({
+    origin.strip().rstrip("/")
+    for origin in [*DEFAULT_ALLOWED_ORIGINS, *CONFIGURED_ORIGINS]
+    if origin.strip()
+})
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    # Permit this Vercel project's production, branch, and preview deployment URLs.
+    allow_origin_regex=r"^https://clip-master-ai-oh8r(?:-[a-z0-9-]+)?\.vercel\.app$",
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["Content-Type"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 ROOT = Path(os.getenv("CLIP_STORAGE_DIR", "/tmp/clipmaster"))
