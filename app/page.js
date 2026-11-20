@@ -92,6 +92,19 @@ export default function Home() {
     setMessageType(id ? "success" : "error");
   }
 
+  function handleVideoSelection(event) {
+    const input = event.currentTarget;
+    const file = input.files?.[0] || null;
+    if (!file) return;
+
+    setSelectedFile(file);
+    setVideoId("");
+    setUrl("");
+    setGeneratedClips([]);
+    setMessage("Video selected. Preview it below before continuing.");
+    setMessageType("info");
+  }
+
   async function startGeneration() {
     if (!videoId && !selectedFile) {
       setMessage("Paste a YouTube link or choose a video file first.");
@@ -250,14 +263,9 @@ export default function Home() {
             id="video-file"
             type="file"
             accept="video/*,.mp4,.mov,.m4v,.mkv,.webm,.avi,.wmv,.flv,.mpeg,.mpg,.mpe,.3gp,.3g2,.ts,.mts,.m2ts,.ogv,.ogg,.vob,.asf,.mxf"
-            onChange={e => {
-              const file = e.target.files?.[0] || null;
-              setSelectedFile(file);
-              setVideoId("");
-              setUrl("");
-              setMessage(file ? "Video selected. Preview it below before continuing." : "");
-              setMessageType("info");
-            }}
+            onClick={e => { e.currentTarget.value = ""; }}
+            onInput={handleVideoSelection}
+            onChange={handleVideoSelection}
             style={{ display: "block", width: "100%", boxSizing: "border-box", padding: 13, border: "1px dashed #52627d", borderRadius: 10, background: "#080b14", color: "#dce6f7" }}
           />
           {selectedFile && (
