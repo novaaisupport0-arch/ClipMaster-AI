@@ -1,5 +1,6 @@
 import asyncio
 import glob
+import logging
 import os
 import shutil
 import subprocess
@@ -8,13 +9,16 @@ import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logger = logging.getLogger("clipmaster.api")
+
 import imageio_ffmpeg
 import yt_dlp
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
-app = FastAPI(title="ClipMaster AI API", version="1.1")
+app = FastAPI(title="ClipMaster AI API", version="1.2")
 
 app.add_middleware(
     CORSMiddleware,
@@ -110,8 +114,11 @@ def process_job(job_id, source_path=None, youtube_url=None):
     job_dir = JOBS_DIR / job_id
     output_dir = job_dir / "clips"
     output_dir.mkdir(parents=True, exist_ok=True)
-    JOBS[job_id]["status"] = "processing"
     try:
+        if job_id not in JOBS:
+            raise RuntimeError("This job is no longer available. Please submit the video again.")
+        JOBS[job_id]["status"] = "processing"
+        logger.info("Job %s started; source_type=%s", job_id, "upload" if source_path else "youtube")
         source = Path(source_path) if source_path else download_youtube(youtube_url, job_dir)
         if not source.exists():
             raise RuntimeError("The uploaded source video is missing.")
@@ -128,10 +135,13 @@ def process_job(job_id, source_path=None, youtube_url=None):
             for clip in clips
         ]
         JOBS[job_id]["status"] = "completed"
+        logger.info("Job %s completed; clips=%s", job_id, len(clips))
         JOBS[job_id]["message"] = "Your vertical clips are ready to download."
     except Exception as exc:
-        JOBS[job_id]["status"] = "failed"
-        JOBS[job_id]["message"] = str(exc)[:1200]
+        logger.exception("Job %s failed", job_id)
+        if job_id in JOBS:
+            JOBS[job_id]["status"] = "failed"
+            JOBS[job_id]["message"] = str(exc)[:1200]
     finally:
         # Keep generated clips for up to five hours on temporary server storage.
         if source_path:
@@ -148,7 +158,41 @@ def home():
 
 @app.get("/health")
 def health():
-    return {"status": "healthy"}
+    return {"status": "healthy", "service": "ClipMaster AI API", "version": app.version}
+
+
+@app.get("/diagnostics")
+def diagnostics():
+    """Non-secret runtime checks to verify the deployed processing dependencies."""
+    try:
+        ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
+        ffmpeg_ok = Path(ffmpeg_path).is_file()
+    except Exception as exc:
+        logger.exception("FFmpeg diagnostic failed")
+        ffmpeg_ok = False
+    try:
+        import yt_dlp.version
+        ytdlp_version = yt_dlp.version.__version__
+    except Exception:
+        ytdlp_version = "unknown"
+    try:
+        JOBS_DIR.mkdir(parents=True, exist_ok=True)
+        probe = JOBS_DIR / f".write-test-{uuid.uuid4().hex}"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        storage_writable = True
+    except Exception:
+        logger.exception("Storage diagnostic failed")
+        storage_writable = False
+    return {
+        "status": "healthy" if ffmpeg_ok and storage_writable else "degraded",
+        "version": app.version,
+        "ffmpeg_available": ffmpeg_ok,
+        "yt_dlp_version": ytdlp_version,
+        "storage_writable": storage_writable,
+        "active_jobs_in_memory": len(JOBS),
+        "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
+    }
 
 
 @app.post("/jobs")
@@ -176,6 +220,7 @@ async def create_job(
     }
 
     if video:
+        logger.info("Upload request received; filename=%s content_type=%s", Path(video.filename or "video").name, video.content_type or "unknown")
         if not (video.content_type or "").startswith("video/"):
             shutil.rmtree(job_dir, ignore_errors=True)
             raise HTTPException(status_code=400, detail="Please upload a supported video file.")
@@ -194,17 +239,21 @@ async def create_job(
                     if total > MAX_UPLOAD_BYTES:
                         raise HTTPException(status_code=413, detail="Upload limit is 150 MB.")
                     destination.write(chunk)
+            logger.info("Upload saved; job_id=%s size_bytes=%s", job_id, total)
         except Exception:
+            logger.exception("Upload failed while receiving file; job_id=%s", job_id)
             shutil.rmtree(job_dir, ignore_errors=True)
             raise
         finally:
             await video.close()
         background_tasks.add_task(process_job, job_id, str(source_path), None)
+        logger.info("Upload job queued; job_id=%s", job_id)
     else:
         if not valid_youtube_url(youtube_url):
             shutil.rmtree(job_dir, ignore_errors=True)
             raise HTTPException(status_code=400, detail="Only standard YouTube video links are supported.")
         background_tasks.add_task(process_job, job_id, None, youtube_url.strip())
+        logger.info("YouTube job queued; job_id=%s", job_id)
 
     return {"job_id": job_id, "status": "queued"}
 
