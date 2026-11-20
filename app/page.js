@@ -114,6 +114,10 @@ export default function Home() {
     setGeneratedClips([]);
     setMessage("Video selected. Preview it below before continuing.");
     setMessageType("info");
+
+    // Reset only after capturing the File. Resetting before the Android picker
+    // opens can interfere with the first selection on some mobile browsers.
+    input.value = "";
   }
 
   async function startGeneration() {
@@ -284,7 +288,6 @@ export default function Home() {
               id="video-file"
               type="file"
               accept="video/*"
-              onClick={event => { event.currentTarget.value = ""; }}
               onChange={handleVideoSelection}
               aria-label="Choose a video from your phone"
               style={{ position: "absolute", inset: 0, width: "100%", height: "100%", opacity: 0, cursor: "pointer" }}
