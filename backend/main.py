@@ -85,9 +85,31 @@ def download_youtube(url, job_dir):
     return max(candidates, key=lambda path: path.stat().st_size)
 
 
-def make_clips(source, output_dir):
+def get_media_duration(source, ffmpeg):
+    result = subprocess.run(
+        [ffmpeg, "-i", str(source)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    import re
+    match = re.search(r"Duration:\\s*(\\d+):(\\d+):(\\d+(?:\\.\\d+)?)", result.stderr or "")
+    if not match:
+        return None
+    hours, minutes, seconds = match.groups()
+    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+
+
+def make_clips(source, output_dir, job):
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
     output_pattern = str(output_dir / "clip_%02d.mp4")
+    duration = get_media_duration(source, ffmpeg)
+    target_duration = min(duration, CLIP_SECONDS * MAX_CLIPS) if duration else None
+    started = time.time()
+    job["progress"] = 3
+    job["eta_seconds"] = None
+    job["message"] = "Preparing video for processing…"
+
     command = [
         ffmpeg, "-y", "-i", str(source),
         "-t", str(CLIP_SECONDS * MAX_CLIPS),
@@ -97,14 +119,42 @@ def make_clips(source, output_dir):
         "-c:a", "aac", "-b:a", "96k",
         "-f", "segment", "-segment_time", str(CLIP_SECONDS),
         "-reset_timestamps", "1", "-segment_format", "mp4",
+        "-progress", "pipe:1", "-nostats",
         output_pattern,
     ]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=900)
+    process = subprocess.Popen(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        bufsize=1,
+    )
+    last_out_time = 0.0
+    for line in process.stdout:
+        key, separator, value = line.strip().partition("=")
+        if not separator:
+            continue
+        if key in ("out_time_us", "out_time_ms"):
+            try:
+                last_out_time = max(last_out_time, int(value) / 1_000_000)
+            except ValueError:
+                pass
+            if target_duration and target_duration > 0:
+                fraction = min(0.99, last_out_time / target_duration)
+                progress = min(95, max(job.get("progress", 3), 3 + int(fraction * 92)))
+                job["progress"] = progress
+                elapsed = time.time() - started
+                job["eta_seconds"] = max(0, int(elapsed * (1 - fraction) / fraction)) if fraction > 0.01 else None
+                job["message"] = "Creating vertical clips…"
+        elif key == "progress" and value == "end":
+            job["progress"] = max(job.get("progress", 3), 95)
+            job["eta_seconds"] = 0
+
+    return_code = process.wait(timeout=900)
     clips = sorted(output_dir.glob("clip_*.mp4"))
     clips = [path for path in clips if path.exists() and path.stat().st_size > 10_000]
-    if result.returncode != 0 and not clips:
-        detail = (result.stderr or "FFmpeg could not process this video.")[-1200:]
-        raise RuntimeError(detail)
+    if return_code != 0 and not clips:
+        raise RuntimeError("FFmpeg could not process this video. Please try another video.")
     if not clips:
         raise RuntimeError("No clips could be created from this video.")
     return clips[:MAX_CLIPS]
@@ -124,8 +174,9 @@ def process_job(job_id, source_path=None, youtube_url=None):
             raise RuntimeError("The uploaded source video is missing.")
         if source.stat().st_size > MAX_SOURCE_BYTES:
             raise RuntimeError("The video is too large. The current limit is 200 MB.")
-        JOBS[job_id]["message"] = "Creating vertical clips. This can take a few minutes."
-        clips = make_clips(source, output_dir)
+        JOBS[job_id]["progress"] = 2
+        JOBS[job_id]["message"] = "Video received. Preparing processing…"
+        clips = make_clips(source, output_dir, JOBS[job_id])
         JOBS[job_id]["clips"] = [
             {
                 "name": clip.name,
@@ -135,12 +186,15 @@ def process_job(job_id, source_path=None, youtube_url=None):
             for clip in clips
         ]
         JOBS[job_id]["status"] = "completed"
+        JOBS[job_id]["progress"] = 100
+        JOBS[job_id]["eta_seconds"] = 0
         logger.info("Job %s completed; clips=%s", job_id, len(clips))
         JOBS[job_id]["message"] = "Your vertical clips are ready to download."
     except Exception as exc:
         logger.exception("Job %s failed", job_id)
         if job_id in JOBS:
             JOBS[job_id]["status"] = "failed"
+            JOBS[job_id]["eta_seconds"] = None
             JOBS[job_id]["message"] = str(exc)[:1200]
     finally:
         # Keep generated clips for up to five hours on temporary server storage.
@@ -216,6 +270,8 @@ async def create_job(
         "status": "queued",
         "message": "Your video was received and is waiting to be processed.",
         "clips": [],
+        "progress": 0,
+        "eta_seconds": None,
         "created_at": int(time.time()),
     }
 
