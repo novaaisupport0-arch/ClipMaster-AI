@@ -22,6 +22,7 @@ function getYouTubeId(value) {
 }
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://clipmaster-ai-backend.onrender.com";
+const MAX_UPLOAD_BYTES = 150 * 1024 * 1024;
 
 function formatEta(seconds) {
   if (seconds == null || !Number.isFinite(Number(seconds))) return "Calculating…";
@@ -98,9 +99,14 @@ export default function Home() {
     const file = input.files?.[0] || null;
     if (!file) return;
 
-    // Keep the File object in state, then clear the native input so choosing
-    // the same file again also emits a fresh change event on mobile browsers.
-    input.value = "";
+    // Keep the returned File object intact; reset the input before opening the picker instead.
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setSelectedFile(null);
+      setMessage("This video is larger than 150 MiB. Please choose a smaller video.");
+      setMessageType("error");
+      input.value = "";
+      return;
+    }
 
     setSelectedFile(file);
     setVideoId("");
@@ -113,6 +119,11 @@ export default function Home() {
   async function startGeneration() {
     if (!videoId && !selectedFile) {
       setMessage("Paste a YouTube link or choose a video file first.");
+      setMessageType("error");
+      return;
+    }
+    if (selectedFile && selectedFile.size > MAX_UPLOAD_BYTES) {
+      setMessage("This video is larger than 150 MiB. Please choose a smaller video.");
       setMessageType("error");
       return;
     }
@@ -262,7 +273,7 @@ export default function Home() {
           </div>
           <label htmlFor="video-file" style={{ display: "block", fontWeight: 700, marginBottom: 10 }}>Choose a video from your device</label>
           <p style={{ color: "#9daac0", fontSize: 12, lineHeight: 1.6, margin: "0 0 10px" }}>
-            Supports MP4, MOV, MKV, WebM, AVI, WMV, FLV, M4V, MPEG, 3GP, TS, OGV and other FFmpeg-readable video files. Maximum upload: 150 MB.
+            Supports MP4, MOV, MKV, WebM, AVI, WMV, FLV, M4V, MPEG, 3GP, TS, OGV and other FFmpeg-readable video files. Maximum upload: 150 MiB (about 157 MB).
           </p>
           <input
             ref={videoInputRef}
@@ -275,7 +286,7 @@ export default function Home() {
           />
           <button
             type="button"
-            onClick={() => videoInputRef.current?.click()}
+            onClick={() => { if (videoInputRef.current) { videoInputRef.current.value = ""; videoInputRef.current.click(); } }}
             style={{ display: "block", width: "100%", boxSizing: "border-box", padding: 16, border: "1px dashed #69aaff", borderRadius: 12, background: "#0c1b31", color: "#dceeff", fontSize: 15, fontWeight: 800, cursor: "pointer" }}
           >
             <span style={{ display: "block", fontSize: 24, marginBottom: 6 }}>▣</span>
@@ -315,7 +326,7 @@ export default function Home() {
         <section style={{ marginTop: 28, background: "#101a2a", border: "1px solid #294365", padding: 20, borderRadius: 15 }}>
           <h2 style={{ margin: "0 0 10px", fontSize: 21 }}>Free beta processing</h2>
           <p style={{ color: "#b8c9e8", fontSize: 14, lineHeight: 1.7, margin: 0 }}>
-            Current beta engine: FFmpeg creates up to five 30-second vertical clips from the beginning of a video. AI transcription and highlight detection are not enabled yet. Free processing may have daily limits or pauses when computing capacity is unavailable.
+            Current beta engine: FFmpeg detects scene changes and selects up to five 30-second vertical highlight clips. This first version uses visual activity, not semantic AI transcription. Free processing may have daily limits or pauses when computing capacity is unavailable.
           </p>
           <p style={{ color: "#ffcf85", fontSize: 13, lineHeight: 1.6, margin: "12px 0 0" }}>
             Status: video upload and supported YouTube link processing are connected. Clips are temporarily stored on the server for up to five hours; download your clips to keep them.
