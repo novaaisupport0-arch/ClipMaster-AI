@@ -243,10 +243,13 @@ export default function Home() {
             <span style={{ flex: 1, height: 1, background: "#303b52" }} />
           </div>
           <label htmlFor="video-file" style={{ display: "block", fontWeight: 700, marginBottom: 10 }}>Choose a video from your device</label>
+          <p style={{ color: "#9daac0", fontSize: 12, lineHeight: 1.6, margin: "0 0 10px" }}>
+            Supports MP4, MOV, MKV, WebM, AVI, WMV, FLV, M4V, MPEG, 3GP, TS, OGV and other FFmpeg-readable video files. Maximum upload: 150 MB.
+          </p>
           <input
             id="video-file"
             type="file"
-            accept="video/mp4,video/quicktime,video/webm,video/*"
+            accept="video/*,.mp4,.mov,.m4v,.mkv,.webm,.avi,.wmv,.flv,.mpeg,.mpg,.mpe,.3gp,.3g2,.ts,.mts,.m2ts,.ogv,.ogg,.vob,.asf,.mxf"
             onChange={e => {
               const file = e.target.files?.[0] || null;
               setSelectedFile(file);
