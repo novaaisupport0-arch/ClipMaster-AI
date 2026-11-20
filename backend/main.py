@@ -45,7 +45,7 @@ app.add_middleware(
 ROOT = Path(os.getenv("CLIP_STORAGE_DIR", "/tmp/clipmaster"))
 JOBS_DIR = ROOT / "jobs"
 MAX_UPLOAD_BYTES = 150 * 1024 * 1024
-MAX_SOURCE_BYTES = 200 * 1024 * 1024
+MAX_SOURCE_BYTES = MAX_UPLOAD_BYTES
 CLIP_SECONDS = 30
 MAX_CLIPS = 5
 RETENTION_SECONDS = 5 * 60 * 60
@@ -152,62 +152,83 @@ def get_media_duration(source, ffmpeg):
 
 
 def make_clips(source, output_dir, job):
+    """Detect visually active moments, then render up to five vertical highlight clips."""
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-    output_pattern = str(output_dir / "clip_%02d.mp4")
-    duration = get_media_duration(source, ffmpeg)
-    target_duration = min(duration, CLIP_SECONDS * MAX_CLIPS) if duration else None
-    started = time.time()
+    duration = get_media_duration(source, ffmpeg) or float(CLIP_SECONDS)
+    duration = max(float(duration), 0.1)
+    clip_length = min(float(CLIP_SECONDS), duration)
     job["progress"] = 3
     job["eta_seconds"] = None
-    job["message"] = "Preparing video for processing…"
+    job["message"] = "Analyzing scene changes to find highlights…"
+    started = time.time()
 
-    command = [
-        ffmpeg, "-y", "-i", str(source),
-        "-t", str(CLIP_SECONDS * MAX_CLIPS),
-        "-map", "0:v:0", "-map", "0:a?",
-        "-vf", "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280",
-        "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30",
-        "-c:a", "aac", "-b:a", "96k",
-        "-f", "segment", "-segment_time", str(CLIP_SECONDS),
-        "-reset_timestamps", "1", "-segment_format", "mp4",
-        "-progress", "pipe:1", "-nostats",
-        output_pattern,
-    ]
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        bufsize=1,
-    )
-    last_out_time = 0.0
-    for line in process.stdout:
-        key, separator, value = line.strip().partition("=")
-        if not separator:
-            continue
-        if key in ("out_time_us", "out_time_ms"):
-            try:
-                last_out_time = max(last_out_time, int(value) / 1_000_000)
-            except ValueError:
-                pass
-            if target_duration and target_duration > 0:
-                fraction = min(0.99, last_out_time / target_duration)
-                progress = min(95, max(job.get("progress", 3), 3 + int(fraction * 92)))
-                job["progress"] = progress
-                elapsed = time.time() - started
-                job["eta_seconds"] = max(0, int(elapsed * (1 - fraction) / fraction)) if fraction > 0.01 else None
-                job["message"] = "Creating vertical clips…"
-        elif key == "progress" and value == "end":
-            job["progress"] = max(job.get("progress", 3), 95)
-            job["eta_seconds"] = 0
+    scene_events = []
+    try:
+        scan = subprocess.run(
+            [
+                ffmpeg, "-hide_banner", "-i", str(source),
+                "-vf", "select='gt(scene,0.18)',metadata=print:file=-",
+                "-an", "-f", "null", "-"
+            ],
+            capture_output=True, text=True, timeout=1800
+        )
+        current_time = None
+        for line in (scan.stdout + "\n" + scan.stderr).splitlines():
+            time_match = re.search(r"pts_time:([0-9]+(?:\.[0-9]+)?)", line)
+            if time_match:
+                current_time = float(time_match.group(1))
+            if "lavfi.scene_score=" in line and current_time is not None:
+                score_match = re.search(r"lavfi\.scene_score=([0-9]+(?:\.[0-9]+)?)", line)
+                if score_match:
+                    scene_events.append((current_time, float(score_match.group(1))))
+    except Exception:
+        logger.exception("Scene-change analysis failed; using evenly spaced clips")
 
-    return_code = process.wait(timeout=900)
-    clips = sorted(output_dir.glob("clip_*.mp4"))
-    clips = [path for path in clips if path.exists() and path.stat().st_size > 10_000]
-    if return_code != 0 and not clips:
-        raise RuntimeError("FFmpeg could not process this video. Please try another video.")
+    # Rank 30-second windows by the number and strength of scene changes.
+    if duration <= clip_length:
+        starts = [0.0]
+    else:
+        candidates = []
+        latest = max(0.0, duration - clip_length)
+        candidate = 0.0
+        while candidate <= latest + 0.001:
+            events = [score for timestamp, score in scene_events if candidate <= timestamp < candidate + clip_length]
+            density = min(1.0, len(events) / max(3.0, clip_length / 5.0))
+            strongest = max(events, default=0.0)
+            candidates.append((density * 0.8 + strongest * 0.2, candidate))
+            candidate += 5.0
+        candidates.sort(reverse=True)
+        starts = []
+        for score, candidate in candidates:
+            if all(abs(candidate - chosen) >= max(15.0, clip_length * 0.55) for chosen in starts):
+                starts.append(candidate)
+            if len(starts) >= MAX_CLIPS:
+                break
+        starts = sorted(starts or [0.0])
+
+    clips = []
+    for index, clip_start in enumerate(starts):
+        clip_duration = min(clip_length, duration - clip_start)
+        output_path = output_dir / f"clip_{index:02d}.mp4"
+        result = subprocess.run(
+            [
+                ffmpeg, "-y", "-ss", f"{clip_start:.3f}", "-i", str(source),
+                "-t", f"{clip_duration:.3f}", "-map", "0:v:0", "-map", "0:a?",
+                "-vf", "scale=720:1280:force_original_aspect_ratio=increase,crop=720:1280",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30",
+                "-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart",
+                str(output_path)
+            ],
+            capture_output=True, text=True, timeout=900
+        )
+        if result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 10_000:
+            clips.append(output_path)
+        job["progress"] = min(95, 5 + int(((index + 1) / len(starts)) * 90))
+        job["eta_seconds"] = max(0, int((time.time() - started) / (index + 1) * (len(starts) - index - 1)))
+        job["message"] = f"Creating highlight clip {index + 1} of {len(starts)}…"
+
     if not clips:
-        raise RuntimeError("No clips could be created from this video.")
+        raise RuntimeError("No highlight clips could be created from this video. Please try another video.")
     return clips[:MAX_CLIPS]
 
 
@@ -224,7 +245,7 @@ def process_job(job_id, source_path=None, youtube_url=None):
         if not source.exists():
             raise RuntimeError("The uploaded source video is missing.")
         if source.stat().st_size > MAX_SOURCE_BYTES:
-            raise RuntimeError("The video is too large. The current limit is 200 MB.")
+            raise RuntimeError("The video is too large. The current limit is 150 MB.")
         JOBS[job_id]["progress"] = 2
         JOBS[job_id]["message"] = "Video received. Preparing processing…"
         clips = make_clips(source, output_dir, JOBS[job_id])
@@ -297,6 +318,7 @@ def diagnostics():
         "storage_writable": storage_writable,
         "active_jobs_in_memory": len(JOBS),
         "max_upload_mb": MAX_UPLOAD_BYTES // (1024 * 1024),
+        "max_source_mb": MAX_SOURCE_BYTES // (1024 * 1024),
     }
 
 
@@ -338,6 +360,16 @@ async def create_job(
                 detail="Unsupported file extension. Try MP4, MOV, MKV, WebM, AVI, WMV, FLV, M4V, MPEG, 3GP, TS or OGV.",
             )
         source_path = job_dir / f"upload{extension}"
+        # Check the spooled upload size before copying or queueing any processing.
+        try:
+            video.file.seek(0, os.SEEK_END)
+            declared_file_size = video.file.tell()
+            video.file.seek(0)
+        except (OSError, AttributeError):
+            declared_file_size = 0
+        if declared_file_size > MAX_UPLOAD_BYTES:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            raise HTTPException(status_code=413, detail="Upload limit is 150 MiB. Please choose a smaller video.")
         total = 0
         try:
             with source_path.open("wb") as destination:
@@ -347,7 +379,7 @@ async def create_job(
                         break
                     total += len(chunk)
                     if total > MAX_UPLOAD_BYTES:
-                        raise HTTPException(status_code=413, detail="Upload limit is 150 MB.")
+                        raise HTTPException(status_code=413, detail="Upload limit is 150 MiB. Please choose a smaller video.")
                     destination.write(chunk)
             if total == 0:
                 raise HTTPException(status_code=400, detail="The selected video file is empty.")
