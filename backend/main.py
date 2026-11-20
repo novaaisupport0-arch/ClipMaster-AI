@@ -94,7 +94,7 @@ def probe_video_file(source):
         timeout=30,
     )
     details = result.stderr or ""
-    if not re.search(r"Stream #\\d+:\\d+.*Video:", details, re.IGNORECASE):
+    if not re.search(r"Stream #\d+:\d+.*Video:", details, re.IGNORECASE):
         raise HTTPException(
             status_code=415,
             detail="This file is not a readable video, or its video codec is unsupported. Try MP4, MOV, MKV, AVI or WebM.",
