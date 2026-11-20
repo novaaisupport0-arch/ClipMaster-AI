@@ -8,24 +8,33 @@ import time
 import uuid
 from pathlib import Path
 from urllib.parse import urlparse
+from collections import defaultdict, deque
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("clipmaster.api")
 
 import imageio_ffmpeg
 import yt_dlp
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 
 app = FastAPI(title="ClipMaster AI API", version="1.2")
 
+ALLOWED_ORIGINS = [
+    item.strip()
+    for item in os.getenv(
+        "CORS_ORIGINS",
+        "https://clip-master-ai-oh8r.vercel.app,https://clip-master-ai-oh8r-blue-ray.vercel.app"
+    ).split(",")
+    if item.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type"],
 )
 
 ROOT = Path(os.getenv("CLIP_STORAGE_DIR", "/tmp/clipmaster"))
@@ -35,6 +44,9 @@ MAX_SOURCE_BYTES = 200 * 1024 * 1024
 CLIP_SECONDS = 30
 MAX_CLIPS = 5
 RETENTION_SECONDS = 5 * 60 * 60
+RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "10"))
+RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "600"))
+REQUESTS_BY_IP = defaultdict(deque)
 JOBS = {}
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -48,6 +60,27 @@ def cleanup_expired():
                 JOBS.pop(folder.name, None)
         except OSError:
             pass
+
+
+def enforce_rate_limit(client_ip):
+    now = time.time()
+    requests = REQUESTS_BY_IP[client_ip]
+    while requests and now - requests[0] > RATE_LIMIT_WINDOW_SECONDS:
+        requests.popleft()
+    if len(requests) >= RATE_LIMIT_REQUESTS:
+        raise HTTPException(status_code=429, detail="Too many processing requests. Please wait and try again.")
+    requests.append(now)
+
+
+def valid_video_signature(header, extension):
+    # Validate container signatures rather than trusting the browser-supplied MIME type.
+    if extension in {".mp4", ".m4v", ".mov"}:
+        return len(header) >= 12 and header[4:8] == b"ftyp"
+    if extension == ".webm":
+        return header.startswith(bytes.fromhex("1A45DFA3"))
+    if extension == ".mkv":
+        return header.startswith(bytes.fromhex("1A45DFA3"))
+    return False
 
 
 def valid_youtube_url(value):
@@ -251,12 +284,14 @@ def diagnostics():
 
 @app.post("/jobs")
 async def create_job(
+    request: Request,
     background_tasks: BackgroundTasks,
     permission: bool = Form(False),
     youtube_url: str = Form(""),
     video: UploadFile | None = File(None),
 ):
     cleanup_expired()
+    enforce_rate_limit(request.client.host if request.client else "unknown")
     if not permission:
         raise HTTPException(status_code=400, detail="Please confirm you have the right to edit this video.")
     if bool(youtube_url.strip()) == bool(video):
@@ -282,7 +317,8 @@ async def create_job(
             raise HTTPException(status_code=400, detail="Please upload a supported video file.")
         extension = Path(video.filename or "video.mp4").suffix.lower()
         if extension not in {".mp4", ".mov", ".webm", ".mkv", ".m4v"}:
-            extension = ".mp4"
+            shutil.rmtree(job_dir, ignore_errors=True)
+            raise HTTPException(status_code=415, detail="Upload an MP4, MOV, WebM or MKV video.")
         source_path = job_dir / f"upload{extension}"
         total = 0
         try:
@@ -291,6 +327,8 @@ async def create_job(
                     chunk = await video.read(1024 * 1024)
                     if not chunk:
                         break
+                    if total == 0 and not valid_video_signature(chunk[:32], extension):
+                        raise HTTPException(status_code=415, detail="The uploaded file does not match a supported video format.")
                     total += len(chunk)
                     if total > MAX_UPLOAD_BYTES:
                         raise HTTPException(status_code=413, detail="Upload limit is 150 MB.")
@@ -316,6 +354,8 @@ async def create_job(
 
 @app.get("/jobs/{job_id}")
 def get_job(job_id: str):
+    if not re.fullmatch(r"[a-f0-9]{32}", job_id):
+        raise HTTPException(status_code=400, detail="Invalid job ID.")
     job = JOBS.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found. Temporary jobs may expire after five hours or a server restart.")
@@ -324,6 +364,8 @@ def get_job(job_id: str):
 
 @app.get("/jobs/{job_id}/clips/{filename}")
 def download_clip(job_id: str, filename: str):
+    if not re.fullmatch(r"[a-f0-9]{32}", job_id):
+        raise HTTPException(status_code=400, detail="Invalid job ID.")
     if not filename.startswith("clip_") or not filename.endswith(".mp4") or "/" in filename or "\\" in filename:
         raise HTTPException(status_code=400, detail="Invalid clip filename.")
     clip_path = JOBS_DIR / job_id / "clips" / filename
