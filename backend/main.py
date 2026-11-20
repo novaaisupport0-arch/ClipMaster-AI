@@ -188,7 +188,7 @@ def detect_audio_peaks(source, ffmpeg):
     return samples
 
 def make_clips(source, output_dir, job):
-    """Detect visually active moments, then render up to five vertical highlight clips."""
+    """Detect visually active moments, then render up to three vertical highlight clips."""
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
     duration = get_media_duration(source, ffmpeg) or float(CLIP_SECONDS)
     duration = max(float(duration), 0.1)
@@ -328,7 +328,7 @@ def process_job(job_id, source_path=None, youtube_url=None):
 
 @app.get("/")
 def home():
-    return {"status": "online", "project": "ClipMaster AI", "version": "1.1"}
+    return {"status": "online", "project": "ClipMaster AI", "version": app.version}
 
 
 @app.get("/health")
@@ -387,8 +387,6 @@ async def create_job(
         raise HTTPException(status_code=400, detail="Please confirm you have the right to edit this video.")
     if bool(youtube_url.strip()) == bool(video):
         raise HTTPException(status_code=400, detail="Provide either a YouTube URL or one video upload.")
-    enforce_rate_limit(request.client.host if request.client else "unknown")
-
     job_id = uuid.uuid4().hex
     job_dir = JOBS_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -443,12 +441,24 @@ async def create_job(
             raise
         finally:
             await video.close()
+        try:
+            enforce_rate_limit(request.client.host if request.client else "unknown")
+        except HTTPException:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            JOBS.pop(job_id, None)
+            raise
         background_tasks.add_task(process_job, job_id, str(source_path), None)
         logger.info("Upload job queued; job_id=%s", job_id)
     else:
         if not valid_youtube_url(youtube_url):
             shutil.rmtree(job_dir, ignore_errors=True)
             raise HTTPException(status_code=400, detail="Only standard YouTube video links are supported.")
+        try:
+            enforce_rate_limit(request.client.host if request.client else "unknown")
+        except HTTPException:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            JOBS.pop(job_id, None)
+            raise
         background_tasks.add_task(process_job, job_id, None, youtube_url.strip())
         logger.info("YouTube job queued; job_id=%s", job_id)
 
