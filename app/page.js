@@ -97,6 +97,10 @@ export default function Home() {
     const file = input.files?.[0] || null;
     if (!file) return;
 
+    // Keep the File object in state, then clear the native input so choosing
+    // the same file again also emits a fresh change event on mobile browsers.
+    input.value = "";
+
     setSelectedFile(file);
     setVideoId("");
     setUrl("");
@@ -263,8 +267,6 @@ export default function Home() {
             id="video-file"
             type="file"
             accept="video/*,.mp4,.mov,.m4v,.mkv,.webm,.avi,.wmv,.flv,.mpeg,.mpg,.mpe,.3gp,.3g2,.ts,.mts,.m2ts,.ogv,.ogg,.vob,.asf,.mxf"
-            onClick={e => { e.currentTarget.value = ""; }}
-            onInput={handleVideoSelection}
             onChange={handleVideoSelection}
             style={{ display: "block", width: "100%", boxSizing: "border-box", padding: 13, border: "1px dashed #52627d", borderRadius: 10, background: "#080b14", color: "#dce6f7" }}
           />
