@@ -209,6 +209,31 @@ def detect_audio_peaks(source, ffmpeg):
             samples.append((current_time, float(rms_match.group(1))))
     return samples
 
+def run_ffmpeg_with_progress(command, duration, job, start_progress, end_progress, message, timeout=1800):
+    """Map FFmpeg's decoded media timestamp to real analysis progress."""
+    command = list(command)
+    output_index = command.index("-f")
+    command[output_index:output_index] = ["-progress", "pipe:1", "-nostats"]
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
+    try:
+        for line in process.stdout:
+            if line.startswith("out_time_ms=") and duration > 0:
+                try:
+                    media_seconds = int(line.split("=", 1)[1]) / 1_000_000
+                    fraction = min(1.0, max(0.0, media_seconds / duration))
+                    job["progress"] = min(end_progress, start_progress + int((end_progress - start_progress) * fraction))
+                    job["message"] = message
+                except (ValueError, ZeroDivisionError):
+                    pass
+        return_code = process.wait(timeout=timeout)
+        if return_code != 0:
+            raise RuntimeError(f"FFmpeg analysis failed with exit code {return_code}.")
+    except Exception:
+        process.kill()
+        process.wait()
+        raise
+
+
 def make_clips(source, output_dir, job):
     """Detect visually active moments, then render up to three vertical highlight clips."""
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
@@ -217,35 +242,54 @@ def make_clips(source, output_dir, job):
     clip_length = min(float(CLIP_SECONDS), duration)
     job["progress"] = 3
     job["eta_seconds"] = None
-    job["message"] = "Analyzing scene changes and audio peaks to find highlights…"
+    job["message"] = "Starting video analysis…"
     started = time.time()
 
     scene_events = []
     audio_samples = []
+    scene_metadata = output_dir / "scene_metadata.txt"
+    audio_metadata = output_dir / "audio_metadata.txt"
     try:
-        scan = subprocess.run(
+        run_ffmpeg_with_progress(
             [
                 ffmpeg, "-hide_banner", "-i", str(source),
-                "-vf", "select='gt(scene,0.18)',metadata=print:file=-",
+                "-vf", f"select='gt(scene,0.18)',metadata=print:file={scene_metadata}",
                 "-an", "-f", "null", "-"
             ],
-            capture_output=True, text=True, timeout=1800
+            duration, job, 3, 35, "Scanning video frames for scene changes…"
         )
         current_time = None
-        for line in (scan.stdout + "\n" + scan.stderr).splitlines():
-            time_match = re.search(r"pts_time:([0-9]+(?:\.[0-9]+)?)", line)
+        for line in scene_metadata.read_text(encoding="utf-8", errors="replace").splitlines():
+            time_match = re.search(r"pts_time:([0-9]+(?:\\.[0-9]+)?)", line)
             if time_match:
                 current_time = float(time_match.group(1))
             if "lavfi.scene_score=" in line and current_time is not None:
-                score_match = re.search(r"lavfi\.scene_score=([0-9]+(?:\.[0-9]+)?)", line)
+                score_match = re.search(r"lavfi\\.scene_score=([0-9]+(?:\\.[0-9]+)?)", line)
                 if score_match:
                     scene_events.append((current_time, float(score_match.group(1))))
     except Exception:
         logger.exception("Scene-change analysis failed; continuing with audio analysis")
     try:
-        audio_samples = detect_audio_peaks(source, ffmpeg)
+        audio_command = [
+            ffmpeg, "-hide_banner", "-i", str(source), "-vn",
+            "-af", f"aresample=8000,asetnsamples=n=8000:p=1,astats=metadata=1:reset=1,ametadata=print:file={audio_metadata}",
+            "-f", "null", "-"
+        ]
+        run_ffmpeg_with_progress(
+            audio_command, duration, job, 35, 60, "Analyzing audio levels and peaks…"
+        )
+        current_time = None
+        for line in audio_metadata.read_text(encoding="utf-8", errors="replace").splitlines():
+            time_match = re.search(r"pts_time:([0-9]+(?:\\.[0-9]+)?)", line)
+            if time_match:
+                current_time = float(time_match.group(1))
+            rms_match = re.search(r"lavfi\\.astats\\.Overall\\.RMS_level=(-?[0-9]+(?:\\.[0-9]+)?)", line)
+            if rms_match and current_time is not None:
+                audio_samples.append((current_time, float(rms_match.group(1))))
     except Exception:
         logger.exception("Audio peak analysis failed; continuing with scene analysis")
+    job["progress"] = max(job.get("progress", 0), 60)
+    job["message"] = "Ranking the best moments in your video…"
 
     # Rank 30-second windows by scene changes and audio energy.
     if duration <= clip_length:
