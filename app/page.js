@@ -50,17 +50,18 @@ export default function Home() {
   const [url, setUrl] = useState("");
   const [selectedFile, setSelectedFile] = useState(null);
   const [filePreview, setFilePreview] = useState("");
+  const [previewError, setPreviewError] = useState("");
   const videoInputRef = useRef(null);
+  const previewUrlRef = useRef("");
 
   useEffect(() => {
-    if (!selectedFile) {
-      setFilePreview("");
-      return;
-    }
-    const previewUrl = URL.createObjectURL(selectedFile);
-    setFilePreview(previewUrl);
-    return () => URL.revokeObjectURL(previewUrl);
-  }, [selectedFile]);
+    return () => {
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current);
+        previewUrlRef.current = "";
+      }
+    };
+  }, []);
   const [videoId, setVideoId] = useState("");
   const [permission, setPermission] = useState(false);
   const [message, setMessage] = useState("");
@@ -101,6 +102,10 @@ export default function Home() {
 
     // Keep the returned File object intact; reset the input before opening the picker instead.
     if (file.size > MAX_UPLOAD_BYTES) {
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = "";
+      setFilePreview("");
+      setPreviewError("");
       setSelectedFile(null);
       setMessage("This video is larger than 150 MB. Please choose a smaller video.");
       setMessageType("error");
@@ -108,6 +113,13 @@ export default function Home() {
       return;
     }
 
+    // Create the preview URL directly from the File captured in this change event.
+    // This avoids waiting for a second React effect on the first Android selection.
+    const nextPreviewUrl = URL.createObjectURL(file);
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    previewUrlRef.current = nextPreviewUrl;
+    setFilePreview(nextPreviewUrl);
+    setPreviewError("");
     setSelectedFile(file);
     setVideoId("");
     setUrl("");
@@ -115,8 +127,7 @@ export default function Home() {
     setMessage("Video selected. Preview it below before continuing.");
     setMessageType("info");
 
-    // Reset only after capturing the File. Resetting before the Android picker
-    // opens can interfere with the first selection on some mobile browsers.
+    // Reset only after capturing the File and creating its preview URL.
     input.value = "";
   }
 
@@ -303,14 +314,27 @@ export default function Home() {
               </p>
               {filePreview && (
                 <video
+                  key={filePreview}
                   controls
                   playsInline
+                  preload="metadata"
                   src={filePreview}
+                  onLoadedMetadata={() => setPreviewError("")}
+                  onError={() => setPreviewError("Your browser could not preview this video's format or codec. You can still try processing it if FFmpeg supports it.")}
                   style={{ display: "block", width: "100%", maxHeight: 420, borderRadius: 12, background: "#05070c" }}
                 />
               )}
+              {previewError && <p role="status" style={{ color: "#ffcf85", fontSize: 12, lineHeight: 1.5 }}>{previewError}</p>}
               <button
-                onClick={() => { setSelectedFile(null); setMessage(""); }}
+                onClick={() => {
+                  if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+                  previewUrlRef.current = "";
+                  setFilePreview("");
+                  setPreviewError("");
+                  setSelectedFile(null);
+                  setMessage("");
+                  if (videoInputRef.current) videoInputRef.current.value = "";
+                }}
                 style={{ marginTop: 10, padding: "9px 13px", background: "#27334a", color: "white", border: 0, borderRadius: 8, cursor: "pointer" }}
               >
                 Remove selected video
