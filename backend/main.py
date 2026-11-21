@@ -260,11 +260,11 @@ def make_clips(source, output_dir, job):
         )
         current_time = None
         for line in scene_metadata.read_text(encoding="utf-8", errors="replace").splitlines():
-            time_match = re.search(r"pts_time:([0-9]+(?:\\.[0-9]+)?)", line)
+            time_match = re.search(r"pts_time:([0-9]+(?:\.[0-9]+)?)", line)
             if time_match:
                 current_time = float(time_match.group(1))
             if "lavfi.scene_score=" in line and current_time is not None:
-                score_match = re.search(r"lavfi\\.scene_score=([0-9]+(?:\\.[0-9]+)?)", line)
+                score_match = re.search(r"lavfi\.scene_score=([0-9]+(?:\.[0-9]+)?)", line)
                 if score_match:
                     scene_events.append((current_time, float(score_match.group(1))))
     except Exception:
@@ -280,10 +280,10 @@ def make_clips(source, output_dir, job):
         )
         current_time = None
         for line in audio_metadata.read_text(encoding="utf-8", errors="replace").splitlines():
-            time_match = re.search(r"pts_time:([0-9]+(?:\\.[0-9]+)?)", line)
+            time_match = re.search(r"pts_time:([0-9]+(?:\.[0-9]+)?)", line)
             if time_match:
                 current_time = float(time_match.group(1))
-            rms_match = re.search(r"lavfi\\.astats\\.Overall\\.RMS_level=(-?[0-9]+(?:\\.[0-9]+)?)", line)
+            rms_match = re.search(r"lavfi\.astats\.Overall\.RMS_level=(-?[0-9]+(?:\.[0-9]+)?)", line)
             if rms_match and current_time is not None:
                 audio_samples.append((current_time, float(rms_match.group(1))))
     except Exception:
