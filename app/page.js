@@ -177,7 +177,7 @@ export default function Home() {
       const jobId = created.job_id;
       setProgress(2);
 
-      for (let attempt = 0; attempt < 120; attempt += 1) {
+      for (let attempt = 0; attempt < 1200; attempt += 1) {
         await new Promise(resolve => setTimeout(resolve, 3000));
         const statusResponse = await fetch(`${API_BASE_URL}/jobs/${jobId}`);
         const job = await statusResponse.json();
@@ -199,7 +199,7 @@ export default function Home() {
         }
         setMessage(job.message || "Your video is processing…");
       }
-      throw new Error("Processing is taking longer than expected. Check again in a moment; temporary jobs may not survive a Render restart.");
+      throw new Error("Processing has exceeded the 60-minute wait window. Your job may still be running; check again shortly. Temporary jobs may not survive a Render restart.");
     } catch (error) {
       setMessage(error.message || "Something went wrong while processing your video.");
       setMessageType("error");
