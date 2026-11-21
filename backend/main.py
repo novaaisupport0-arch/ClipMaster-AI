@@ -76,21 +76,40 @@ def enforce_rate_limit(client_ip):
     requests = REQUESTS_BY_IP[client_ip]
     while requests and now - requests[0] > RATE_LIMIT_WINDOW_SECONDS:
         requests.popleft()
-    if len(requests) >= RATE_LIMIT_REQUESTS:
-        raise HTTPException(status_code=429, detail="Too many requests in a short period. Please wait and try again.")
-    requests.append(now)
 
     # Anonymous Free-tier quota until accounts and persistent subscription storage exist.
     # Users sharing a public IP also share this provisional quota.
     daily_requests = FREE_REQUESTS_BY_IP[client_ip]
     while daily_requests and now - daily_requests[0] > FREE_DAILY_WINDOW_SECONDS:
         daily_requests.popleft()
+
+    # Check both limits before recording either one, so a rejected daily-quota
+    # request does not consume a short-window rate-limit slot.
+    if len(requests) >= RATE_LIMIT_REQUESTS:
+        raise HTTPException(status_code=429, detail="Too many requests in a short period. Please wait and try again.")
     if len(daily_requests) >= FREE_DAILY_REQUESTS:
         raise HTTPException(
             status_code=429,
             detail="Free beta limit reached: 3 processing requests per rolling 24 hours per network. Please try again later."
         )
+
+    requests.append(now)
     daily_requests.append(now)
+    return now
+
+
+def refund_free_quota(client_ip, quota_timestamp):
+    """Refund a reserved daily Free request when the source exceeds the duration limit."""
+    if not client_ip or quota_timestamp is None:
+        return
+    daily_requests = FREE_REQUESTS_BY_IP.get(client_ip)
+    if not daily_requests:
+        return
+    try:
+        daily_requests.remove(quota_timestamp)
+        logger.info("Refunded Free quota for client %s after duration validation", client_ip)
+    except ValueError:
+        pass
 
 
 SUPPORTED_VIDEO_EXTENSIONS = {
@@ -294,6 +313,8 @@ def process_job(job_id, source_path=None, youtube_url=None):
             raise RuntimeError("The video is too large. The Free beta upload limit is 150 MB.")
         source_duration = get_media_duration(source, imageio_ffmpeg.get_ffmpeg_exe())
         if source_duration is not None and source_duration > MAX_VIDEO_DURATION_SECONDS:
+            job = JOBS[job_id]
+            refund_free_quota(job.get("quota_client_ip"), job.get("quota_timestamp"))
             raise RuntimeError("The Free beta video duration limit is 15 minutes.")
         JOBS[job_id]["progress"] = 2
         JOBS[job_id]["message"] = "Video received. Preparing processing…"
@@ -434,6 +455,9 @@ async def create_job(
             if total == 0:
                 raise HTTPException(status_code=400, detail="The selected video file is empty.")
             probe_video_file(source_path)
+            upload_duration = get_media_duration(source_path, imageio_ffmpeg.get_ffmpeg_exe())
+            if upload_duration is not None and upload_duration > MAX_VIDEO_DURATION_SECONDS:
+                raise HTTPException(status_code=413, detail="The Free beta video duration limit is 15 minutes.")
             logger.info("Upload saved and verified; job_id=%s size_bytes=%s extension=%s", job_id, total, extension)
         except Exception:
             logger.exception("Upload failed validation or receiving; job_id=%s", job_id)
@@ -441,8 +465,11 @@ async def create_job(
             raise
         finally:
             await video.close()
+        client_ip = request.client.host if request.client else "unknown"
         try:
-            enforce_rate_limit(request.client.host if request.client else "unknown")
+            quota_timestamp = enforce_rate_limit(client_ip)
+            JOBS[job_id]["quota_client_ip"] = client_ip
+            JOBS[job_id]["quota_timestamp"] = quota_timestamp
         except HTTPException:
             shutil.rmtree(job_dir, ignore_errors=True)
             JOBS.pop(job_id, None)
@@ -453,8 +480,11 @@ async def create_job(
         if not valid_youtube_url(youtube_url):
             shutil.rmtree(job_dir, ignore_errors=True)
             raise HTTPException(status_code=400, detail="Only standard YouTube video links are supported.")
+        client_ip = request.client.host if request.client else "unknown"
         try:
-            enforce_rate_limit(request.client.host if request.client else "unknown")
+            quota_timestamp = enforce_rate_limit(client_ip)
+            JOBS[job_id]["quota_client_ip"] = client_ip
+            JOBS[job_id]["quota_timestamp"] = quota_timestamp
         except HTTPException:
             shutil.rmtree(job_dir, ignore_errors=True)
             JOBS.pop(job_id, None)
