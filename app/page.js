@@ -210,6 +210,7 @@ export default function Home() {
 
   return (
     <main style={{ minHeight: "100vh", background: "#080b14", color: "#f7f9ff", padding: "28px 18px 36px", fontFamily: "Arial, sans-serif" }}>
+      <style>{`@keyframes clipmaster-progress-sweep { 0% { transform: translateX(-110%); } 100% { transform: translateX(320%); } }`}</style>
       <div style={{ maxWidth: 960, margin: "0 auto" }}>
         <header style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{ width: 38, height: 38, display: "grid", placeItems: "center", borderRadius: 11, background: "#287cff", fontSize: 22 }}>✂</div>
@@ -250,12 +251,20 @@ export default function Home() {
           {message && <p role="status" style={{ color: messageType === "error" ? "#ff9b9b" : messageType === "success" ? "#8ee5b2" : "#b8c9e8", lineHeight: 1.6, fontSize: 14, margin: "14px 0 0" }}>{message}</p>}
           {isGenerating && <div style={{ marginTop: 16, padding: 14, borderRadius: 12, background: "#0c1322", border: "1px solid #303b52" }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 9, fontSize: 14 }}>
-              <strong>Video processing</strong><strong>{progress}%</strong>
+              <strong>Video processing</strong><strong>{progress > 3 ? `${progress}%` : "Working…"}</strong>
             </div>
-            <div style={{ height: 10, overflow: "hidden", borderRadius: 20, background: "#303b52" }}>
-              <div style={{ width: `${progress}%`, height: "100%", borderRadius: 20, background: "#287cff", transition: "width 0.5s ease" }} />
+            <div style={{ height: 10, overflow: "hidden", position: "relative", borderRadius: 20, background: "#303b52" }}>
+              {progress <= 3 ? (
+                <div style={{ position: "absolute", inset: "0 auto 0 0", width: "35%", borderRadius: 20, background: "#287cff", animation: "clipmaster-progress-sweep 1.4s ease-in-out infinite" }} />
+              ) : (
+                <div style={{ width: `${progress}%`, height: "100%", borderRadius: 20, background: "#287cff", transition: "width 0.5s ease" }} />
+              )}
             </div>
-            <p style={{ margin: "9px 0 0", color: "#b8c9e8", fontSize: 13 }}>Estimated time remaining: {formatEta(etaSeconds)}. This is an estimate and may change with server speed.</p>
+            <p style={{ margin: "9px 0 0", color: "#b8c9e8", fontSize: 13 }}>
+              {progress <= 3
+                ? (progress === 3 ? "Analyzing video scenes and audio… This stage can take a while; the moving indicator means processing is active." : "Preparing your video…")
+                : `Estimated time remaining: ${formatEta(etaSeconds)}. This is an estimate and may change with server speed.`}
+            </p>
           </div>}
           {generatedClips.length > 0 && <div style={{ marginTop: 18, display: "grid", gap: 10 }}><h3 style={{ margin: 0 }}>Your clips</h3>{generatedClips.map(clip => <a key={clip.name} href={`${API_BASE_URL}${clip.url}`} target="_blank" rel="noreferrer" download style={{ display: "block", padding: 13, borderRadius: 10, background: "#20334e", color: "#9dccff", textDecoration: "none", fontWeight: 700 }}>Download {clip.name} · {(clip.size_bytes / (1024 * 1024)).toFixed(1)} MB</a>)}</div>}
 
