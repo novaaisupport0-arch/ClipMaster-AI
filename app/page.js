@@ -251,7 +251,7 @@ export default function Home() {
           {message && <p role="status" style={{ color: messageType === "error" ? "#ff9b9b" : messageType === "success" ? "#8ee5b2" : "#b8c9e8", lineHeight: 1.6, fontSize: 14, margin: "14px 0 0" }}>{message}</p>}
           {isGenerating && <div style={{ marginTop: 16, padding: 14, borderRadius: 12, background: "#0c1322", border: "1px solid #303b52" }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 9, fontSize: 14 }}>
-              <strong>Video processing</strong><strong>{progress > 3 ? `${progress}%` : "Working…"}</strong>
+              <strong>Video processing</strong><strong>{`${Math.round(progress)}%`}</strong>
             </div>
             <div style={{ height: 10, overflow: "hidden", position: "relative", borderRadius: 20, background: "#303b52" }}>
               {progress <= 3 ? (
