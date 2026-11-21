@@ -291,9 +291,16 @@ def make_clips(source, output_dir, job):
     job["progress"] = max(job.get("progress", 0), 60)
     job["message"] = "Ranking the best moments in your video…"
 
-    # Rank 30-second windows by scene changes and audio energy.
+    # Rank candidate windows with explainable, lightweight FFmpeg signals.
+    # This is a heuristic highlight score, not a semantic/virality prediction.
     if duration <= clip_length:
-        starts = [0.0]
+        selected = [{
+            "start": 0.0,
+            "score": 50,
+            "scene_score": 0.0,
+            "audio_score": 0.0,
+            "reason": "The source video is shorter than one clip."
+        }]
     else:
         candidates = []
         latest = max(0.0, duration - clip_length)
@@ -304,22 +311,44 @@ def make_clips(source, output_dir, job):
             strongest = max(events, default=0.0)
             levels = [level for timestamp, level in audio_samples if candidate <= timestamp < candidate + clip_length and level > -65]
             audio_score = 0.0
+            dynamics_score = 0.0
             if levels:
                 average_db = sum(levels) / len(levels)
                 audio_score = max(0.0, min(1.0, (average_db + 55.0) / 35.0))
-            candidates.append((density * 0.55 + audio_score * 0.35 + strongest * 0.10, candidate))
+                dynamics_score = max(0.0, min(1.0, (max(levels) - min(levels)) / 30.0))
+            scene_score = min(1.0, density * 0.75 + strongest * 0.25)
+            combined_score = scene_score * 0.45 + audio_score * 0.35 + dynamics_score * 0.10 + strongest * 0.10
+            reasons = []
+            if scene_score >= 0.35:
+                reasons.append("frequent visual scene changes")
+            if audio_score >= 0.35:
+                reasons.append("strong audio activity")
+            if dynamics_score >= 0.30:
+                reasons.append("audio intensity changes")
+            candidates.append({
+                "start": candidate,
+                "score": int(round(combined_score * 100)),
+                "scene_score": int(round(scene_score * 100)),
+                "audio_score": int(round(audio_score * 100)),
+                "reason": ", ".join(reasons) if reasons else "balanced scene and audio activity"
+            })
             candidate += 5.0
-        candidates.sort(reverse=True)
-        starts = []
-        for score, candidate in candidates:
-            if all(abs(candidate - chosen) >= max(15.0, clip_length * 0.55) for chosen in starts):
-                starts.append(candidate)
-            if len(starts) >= MAX_CLIPS:
+        candidates.sort(key=lambda item: (item["score"], item["start"]), reverse=True)
+        selected = []
+        for item in candidates:
+            if all(abs(item["start"] - chosen["start"]) >= max(15.0, clip_length * 0.55) for chosen in selected):
+                selected.append(item)
+            if len(selected) >= MAX_CLIPS:
                 break
-        starts = sorted(starts or [0.0])
+        selected = sorted(selected or [{
+            "start": 0.0, "score": 0, "scene_score": 0, "audio_score": 0,
+            "reason": "No strong scene or audio signals were detected."
+        }], key=lambda item: item["start"])
 
     clips = []
-    for index, clip_start in enumerate(starts):
+    job["clip_analysis"] = []
+    for index, selection in enumerate(selected):
+        clip_start = selection["start"]
         clip_duration = min(clip_length, duration - clip_start)
         output_path = output_dir / f"clip_{index:02d}.mp4"
         result = subprocess.run(
@@ -335,9 +364,19 @@ def make_clips(source, output_dir, job):
         )
         if result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 10_000:
             clips.append(output_path)
-        job["progress"] = min(95, 5 + int(((index + 1) / len(starts)) * 90))
-        job["eta_seconds"] = max(0, int((time.time() - started) / (index + 1) * (len(starts) - index - 1)))
-        job["message"] = f"Creating highlight clip {index + 1} of {len(starts)}…"
+            job["clip_analysis"].append({
+                "name": output_path.name,
+                "score": selection["score"],
+                "scene_score": selection["scene_score"],
+                "audio_score": selection["audio_score"],
+                "start_seconds": round(clip_start, 1),
+                "duration_seconds": round(clip_duration, 1),
+                "reason": selection["reason"]
+            })
+        render_progress = 60 + int(((index + 1) / len(selected)) * 35)
+        job["progress"] = max(job.get("progress", 0), min(95, render_progress))
+        job["eta_seconds"] = max(0, int((time.time() - started) / (index + 1) * (len(selected) - index - 1)))
+        job["message"] = f"Creating highlight clip {index + 1} of {len(selected)}…"
 
     if not clips:
         raise RuntimeError("No highlight clips could be created from this video. Please try another video.")
@@ -366,11 +405,15 @@ def _process_job(job_id, source_path=None, youtube_url=None):
         JOBS[job_id]["progress"] = 2
         JOBS[job_id]["message"] = "Video received. Preparing processing…"
         clips = make_clips(source, output_dir, JOBS[job_id])
+        analysis_by_name = {
+            item["name"]: item for item in JOBS[job_id].get("clip_analysis", [])
+        }
         JOBS[job_id]["clips"] = [
             {
                 "name": clip.name,
                 "url": f"/jobs/{job_id}/clips/{clip.name}",
                 "size_bytes": clip.stat().st_size,
+                **analysis_by_name.get(clip.name, {}),
             }
             for clip in clips
         ]
