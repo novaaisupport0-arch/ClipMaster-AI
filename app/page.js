@@ -266,7 +266,24 @@ export default function Home() {
                 : `Estimated time remaining: ${formatEta(etaSeconds)}. This is an estimate and may change with server speed.`}
             </p>
           </div>}
-          {generatedClips.length > 0 && <div style={{ marginTop: 18, display: "grid", gap: 10 }}><h3 style={{ margin: 0 }}>Your clips</h3>{generatedClips.map(clip => <a key={clip.name} href={`${API_BASE_URL}${clip.url}`} target="_blank" rel="noreferrer" download style={{ display: "block", padding: 13, borderRadius: 10, background: "#20334e", color: "#9dccff", textDecoration: "none", fontWeight: 700 }}>Download {clip.name} · {(clip.size_bytes / (1024 * 1024)).toFixed(1)} MB</a>)}</div>}
+          {generatedClips.length > 0 && <div style={{ marginTop: 18, display: "grid", gap: 10 }}>
+            <h3 style={{ margin: 0 }}>Your clips</h3>
+            {generatedClips.map(clip => {
+              const start = Math.max(0, Math.floor(Number(clip.start_seconds || 0)));
+              const timestamp = `${Math.floor(start / 60).toString().padStart(2, "0")}:${(start % 60).toString().padStart(2, "0")}`;
+              return <article key={clip.name} style={{ padding: 14, borderRadius: 12, background: "#101a2a", border: "1px solid #303b52" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <strong>{clip.name}</strong>
+                  <span style={{ color: "#8ee5b2", fontSize: 13, fontWeight: 800 }}>Highlight score: {Number.isFinite(Number(clip.score)) ? clip.score : "—"}/100</span>
+                </div>
+                <p style={{ color: "#aab2c5", fontSize: 12, lineHeight: 1.6, margin: "7px 0 12px" }}>
+                  Starts at {timestamp} · {Math.round(Number(clip.duration_seconds || 30))} sec
+                  {clip.reason ? ` · ${clip.reason}` : ""}
+                </p>
+                <a href={`${API_BASE_URL}${clip.url}`} target="_blank" rel="noreferrer" download style={{ display: "block", padding: 13, borderRadius: 10, background: "#20334e", color: "#9dccff", textDecoration: "none", fontWeight: 700 }}>Download clip · {(clip.size_bytes / (1024 * 1024)).toFixed(1)} MB</a>
+              </article>;
+            })}
+          </div>}
 
           {videoId && (
             <div style={{ marginTop: 20 }}>
@@ -362,7 +379,7 @@ export default function Home() {
         <section style={{ marginTop: 28, background: "#101a2a", border: "1px solid #294365", padding: 20, borderRadius: 15 }}>
           <h2 style={{ margin: "0 0 10px", fontSize: 21 }}>Free beta processing</h2>
           <p style={{ color: "#b8c9e8", fontSize: 14, lineHeight: 1.7, margin: 0 }}>
-            Free beta limits are active: up to 3 processing requests per rolling 24 hours per IP address, up to 3 clips per video, 150 MB per upload, and 15 minutes per source video. Jobs use the standard / lower-priority queue. Limits are provisional and may affect people sharing the same network; they reset as older requests pass the 24-hour window. The engine uses FFmpeg scene changes and audio peaks, not semantic AI transcription.
+            Free beta limits are active: up to 3 processing requests per rolling 24 hours per IP address, up to 3 clips per video, 150 MB per upload, and 15 minutes per source video. Jobs use the standard / lower-priority queue. Limits are provisional and may affect people sharing the same network; they reset as older requests pass the 24-hour window. The free engine ranks moments using FFmpeg scene changes, audio activity and audio dynamics. Scores are heuristic signals, not guaranteed virality predictions; speech transcription and semantic AI captions are not enabled yet.
           </p>
           <p style={{ color: "#ffcf85", fontSize: 13, lineHeight: 1.6, margin: "12px 0 0" }}>
             Status: video upload and supported YouTube link processing are connected. Clips are temporarily stored on the server for up to five hours; download your clips to keep them.
