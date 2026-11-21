@@ -107,7 +107,7 @@ def refund_free_quota(client_ip, quota_timestamp):
         return
     try:
         daily_requests.remove(quota_timestamp)
-        logger.info("Refunded Free quota for client %s after duration validation", client_ip)
+        logger.info("Refunded a Free quota after duration validation")
     except ValueError:
         pass
 
