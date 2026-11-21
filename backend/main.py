@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -57,6 +58,8 @@ REQUESTS_BY_IP = defaultdict(deque)
 FREE_REQUESTS_BY_IP = defaultdict(deque)
 MAX_VIDEO_DURATION_SECONDS = 15 * 60
 JOBS = {}
+# The Render Free instance has very limited CPU and memory; run one FFmpeg job at a time.
+PROCESSING_LOCK = threading.Lock()
 JOBS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -297,7 +300,7 @@ def make_clips(source, output_dir, job):
     return clips[:MAX_CLIPS]
 
 
-def process_job(job_id, source_path=None, youtube_url=None):
+def _process_job(job_id, source_path=None, youtube_url=None):
     job_dir = JOBS_DIR / job_id
     output_dir = job_dir / "clips"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -347,6 +350,30 @@ def process_job(job_id, source_path=None, youtube_url=None):
                 pass
 
 
+
+def process_job(job_id, source_path=None, youtube_url=None):
+    """Run one FFmpeg job at a time on the low-resource Free instance."""
+    if not PROCESSING_LOCK.acquire(blocking=False):
+        job = JOBS.get(job_id)
+        if job:
+            refund_free_quota(job.get("quota_client_ip"), job.get("quota_timestamp"))
+            job["status"] = "failed"
+            job["eta_seconds"] = None
+            job["message"] = "The Free processing server is busy with another video. Your request was not charged; please try again in a few minutes."
+        if source_path:
+            try:
+                shutil.rmtree(JOBS_DIR / job_id, ignore_errors=True)
+            except OSError:
+                pass
+        logger.warning("Job %s was not started because the Free processing slot is busy", job_id)
+        return
+
+    try:
+        _process_job(job_id, source_path, youtube_url)
+    finally:
+        PROCESSING_LOCK.release()
+
+
 @app.get("/")
 def home():
     return {"status": "online", "project": "ClipMaster AI", "version": app.version}
@@ -387,6 +414,8 @@ def diagnostics():
         "yt_dlp_version": ytdlp_version,
         "storage_writable": storage_writable,
         "active_jobs_in_memory": len(JOBS),
+        "max_concurrent_processing_jobs": 1,
+        "processing_busy": PROCESSING_LOCK.locked(),
         "max_upload_mb": MAX_UPLOAD_BYTES // 1_000_000,
         "max_source_mb": MAX_SOURCE_BYTES // (1024 * 1024),
         "free_daily_requests_per_ip": FREE_DAILY_REQUESTS,
