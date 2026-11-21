@@ -426,6 +426,7 @@ async def create_job(
         extension = Path(video.filename or "").suffix.lower()
         if extension not in SUPPORTED_VIDEO_EXTENSIONS:
             shutil.rmtree(job_dir, ignore_errors=True)
+            JOBS.pop(job_id, None)
             raise HTTPException(
                 status_code=415,
                 detail="Unsupported file extension. Try MP4, MOV, MKV, WebM, AVI, WMV, FLV, M4V, MPEG, 3GP, TS or OGV.",
@@ -440,6 +441,7 @@ async def create_job(
             declared_file_size = 0
         if declared_file_size > MAX_UPLOAD_BYTES:
             shutil.rmtree(job_dir, ignore_errors=True)
+            JOBS.pop(job_id, None)
             raise HTTPException(status_code=413, detail="Upload limit is 150 MiB. Please choose a smaller video.")
         total = 0
         try:
@@ -462,6 +464,7 @@ async def create_job(
         except Exception:
             logger.exception("Upload failed validation or receiving; job_id=%s", job_id)
             shutil.rmtree(job_dir, ignore_errors=True)
+            JOBS.pop(job_id, None)
             raise
         finally:
             await video.close()
@@ -479,6 +482,7 @@ async def create_job(
     else:
         if not valid_youtube_url(youtube_url):
             shutil.rmtree(job_dir, ignore_errors=True)
+            JOBS.pop(job_id, None)
             raise HTTPException(status_code=400, detail="Only standard YouTube video links are supported.")
         client_ip = request.client.host if request.client else "unknown"
         try:
